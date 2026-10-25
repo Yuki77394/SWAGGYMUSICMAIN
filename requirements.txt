@@ -18,7 +18,7 @@ indic-transliteration
 kurigram==2.2.19
 motor
 nekosbest
-numpy>=2.0.0
+numpy>=2.5.4
 # opencv-python-headless: server-safe build (no libGL needed). The regular
 # opencv-python fails to import on python:3.12-slim (Heroku docker) because
 # libGL.so.1 is absent, which would crash startup while loading plugins.

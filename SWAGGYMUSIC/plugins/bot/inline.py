@@ -3,7 +3,7 @@ from pyrogram.types import (
     InlineKeyboardMarkup,
     InlineQueryResultPhoto,
 )
-from youtubesearchpython.future import VideosSearch
+from py_yt import VideosSearch
 
 from SWAGGYMUSIC.utils.inlinequery import answer
 from SWAGGYMUSIC.button_styles import primary_button

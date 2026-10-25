@@ -3,7 +3,7 @@ import re
 from typing import Any, Dict, Optional, Tuple, Union
 
 from yt_dlp import YoutubeDL
-from youtubesearchpython.future import VideosSearch
+from py_yt import VideosSearch
 
 from SWAGGYMUSIC.utils.downloader import download_audio_concurrent
 from SWAGGYMUSIC.utils.formatters import seconds_to_min

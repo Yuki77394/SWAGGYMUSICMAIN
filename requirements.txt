@@ -19,7 +19,10 @@ kurigram==2.2.19
 motor
 nekosbest
 numpy>=2.0.0
-opencv-python
+# opencv-python-headless: server-safe build (no libGL needed). The regular
+# opencv-python fails to import on python:3.12-slim (Heroku docker) because
+# libGL.so.1 is absent, which would crash startup while loading plugins.
+opencv-python-headless
 Pillow==12.0.0
 psutil
 
@@ -33,8 +36,10 @@ pyshorteners
 python-dotenv
 python-whois
 
-youtube-search-python>=1.6.6
-py-yt-search
+# py-yt-search provides the async VideosSearch API (await .next());
+# replaces youtube-search-python whose .future submodule was removed in 1.6.x
+# and whose sync API is incompatible with httpx==0.28.1 (proxies kwarg removed).
+py-yt-search==0.8.0
 yt-dlp
 
 PyYAML

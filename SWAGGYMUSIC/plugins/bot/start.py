@@ -10,7 +10,7 @@ import aiohttp
 from pyrogram import filters
 from pyrogram.enums import ChatType
 from pyrogram.types import InlineKeyboardMarkup, Message
-from youtubesearchpython.future import VideosSearch
+from py_yt import VideosSearch
 
 import config
 from SWAGGYMUSIC import app

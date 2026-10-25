@@ -4,7 +4,7 @@ from typing import List, Union, Optional
 
 import aiohttp
 from bs4 import BeautifulSoup
-from youtubesearchpython.future import VideosSearch
+from py_yt import VideosSearch
 
 
 APPLE_HEADERS = {

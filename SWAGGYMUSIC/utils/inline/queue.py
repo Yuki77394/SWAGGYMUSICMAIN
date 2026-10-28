@@ -1,8 +1,6 @@
 from typing import Union
-import random
 
-from pyrogram.enums import ButtonStyle
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import InlineKeyboardMarkup
 
 from SWAGGYMUSIC.button_styles import (
     danger_button,
@@ -12,28 +10,12 @@ from SWAGGYMUSIC.button_styles import (
 
 
 # ==========================================================
-# RANDOM BUTTON STYLE
-# Blue / Green / Red
+# FIXED BUTTON STYLES
+#
+# Styles mirror KURIGRAMSWAG's utils/inline/queue.py:
+# Queue = PRIMARY, Timer = SUCCESS, Back = PRIMARY,
+# Close = DANGER. Colours never change between renders.
 # ==========================================================
-
-BUTTON_STYLES = [
-    ButtonStyle.PRIMARY,
-    ButtonStyle.SUCCESS,
-    ButtonStyle.DANGER,
-]
-
-
-def random_button(
-    text,
-    callback_data=None,
-    url=None,
-):
-    return InlineKeyboardButton(
-        text=text,
-        callback_data=callback_data,
-        url=url,
-        style=random.choice(BUTTON_STYLES),
-    )
 
 
 # ==========================================================
@@ -50,11 +32,11 @@ def queue_markup(
 ):
     not_dur = [
         [
-            random_button(
+            primary_button(
                 text=_["QU_B_1"],
                 callback_data=f"GetQueued {CPLAY}|{videoid}",
             ),
-            random_button(
+            danger_button(
                 text=_["CLOSE_BUTTON"],
                 callback_data="close",
             ),
@@ -63,17 +45,17 @@ def queue_markup(
 
     dur = [
         [
-            random_button(
+            success_button(
                 text=_["QU_B_2"].format(played, dur),
                 callback_data="GetTimer",
             )
         ],
         [
-            random_button(
+            primary_button(
                 text=_["QU_B_1"],
                 callback_data=f"GetQueued {CPLAY}|{videoid}",
             ),
-            random_button(
+            danger_button(
                 text=_["CLOSE_BUTTON"],
                 callback_data="close",
             ),
@@ -95,11 +77,11 @@ def queue_back_markup(_, CPLAY):
     upl = InlineKeyboardMarkup(
         [
             [
-                random_button(
+                primary_button(
                     text=_["BACK_BUTTON"],
                     callback_data=f"queue_back_timer {CPLAY}",
                 ),
-                random_button(
+                danger_button(
                     text=_["CLOSE_BUTTON"],
                     callback_data="close",
                 ),
@@ -112,30 +94,33 @@ def queue_back_markup(_, CPLAY):
 
 # ==========================================================
 # ADMIN QUEUE CONTROLS
+#
+# The controls use the same fixed PRIMARY style as the player
+# controls; Close uses DANGER.
 # ==========================================================
 
 def aq_markup(_, chat_id):
     buttons = [
         [
-            random_button(
+            primary_button(
                 text="▷",
                 callback_data=f"ADMIN Resume|{chat_id}",
             ),
-            random_button(
+            primary_button(
                 text="II",
                 callback_data=f"ADMIN Pause|{chat_id}",
             ),
-            random_button(
+            primary_button(
                 text="‣‣I",
                 callback_data=f"ADMIN Skip|{chat_id}",
             ),
-            random_button(
+            primary_button(
                 text="▢",
                 callback_data=f"ADMIN Stop|{chat_id}",
             ),
         ],
         [
-            random_button(
+            danger_button(
                 text=_["CLOSE_BUTTON"],
                 callback_data="close",
             )

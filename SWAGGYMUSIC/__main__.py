@@ -104,6 +104,12 @@ async def init():
     )
     await idle()
     try:
+        # Stop the assistant auto-leave sweep before the clients go away.
+        autoleave_plugin = importlib.import_module("SWAGGYMUSIC.plugins.misc.autoleave")
+        autoleave_plugin.stop_auto_leave()
+    except Exception:
+        pass
+    try:
         weather_plugin = importlib.import_module("SWAGGYMUSIC.plugins.swaggy.weather")
         await weather_plugin.close_weather_http_client()
     except Exception:

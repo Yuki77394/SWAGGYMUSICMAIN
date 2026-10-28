@@ -93,10 +93,11 @@ async def _delete_tracked_message(track: dict, keys: tuple[str, ...]) -> bool:
         chat_id = track.get("player_chat_id")
         message_id = track.get("player_msg_id")
 
-    deleted = await _delete_by_ref(message, chat_id, message_id)
+    # Detach the references before awaiting, so a concurrent caller for the
+    # same track finds nothing left to delete.
     for key in keys:
         track.pop(key, None)
-    return deleted
+    return await _delete_by_ref(message, chat_id, message_id)
 
 
 async def delete_queue_message(chat_id: int, track: dict | None) -> bool:
@@ -110,10 +111,20 @@ async def delete_queue_message(chat_id: int, track: dict | None) -> bool:
     return deleted
 
 
-async def delete_player_message(chat_id: int, track: dict | None) -> bool:
+async def delete_player_message(
+    chat_id: int,
+    track: dict | None,
+    force: bool = False,
+) -> bool:
+    """
+    Delete the player card recorded on ``track``.
+
+    ``force=True`` deletes it regardless of the /autodelete setting; it is
+    used when a track finishes and leaves the queue.
+    """
     if not isinstance(track, dict):
         return False
-    if not await get_autodelete(_setting_chat_id(chat_id, track)):
+    if not force and not await get_autodelete(_setting_chat_id(chat_id, track)):
         return False
     deleted = await _delete_tracked_message(track, PLAYER_REF_KEYS)
     if deleted:

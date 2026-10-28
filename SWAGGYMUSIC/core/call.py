@@ -29,6 +29,7 @@ from SWAGGYMUSIC.utils.database import (
     get_loop,
     get_vcnotify,
     group_assistant,
+    is_active_chat,
     is_autoend,
     is_music_playing,
     music_on,
@@ -40,9 +41,11 @@ from SWAGGYMUSIC.utils.database import (
 from SWAGGYMUSIC.utils.exceptions import AssistantErr
 from SWAGGYMUSIC.utils.formatters import check_duration, seconds_to_min, speed_converter
 from SWAGGYMUSIC.utils.inline.play import stream_markup
+from SWAGGYMUSIC.button_styles import danger_button, primary_button
 from SWAGGYMUSIC.security import build_subprocess_env
 from SWAGGYMUSIC.utils.stream.autoclear import auto_clean
 from SWAGGYMUSIC.utils.stream.autodelete import (
+    delete_player_message,
     delete_queue_message,
     remember_player_message,
 )
@@ -65,6 +68,11 @@ vc_join_targets = {}
 vc_join_call_map = {}
 vc_join_event_cache = {}
 vc_join_notice_cache = {}
+# Bumped by _clear_() whenever a chat's playback session ends. Work that
+# awaited across a session end (an autoplay lookup, a download for the next
+# track) compares tokens and drops itself instead of touching a newer session.
+session_tokens = {}
+_player_card_tasks = set()
 
 PLAYBACK_WATCHDOG_GRACE_SECONDS = 20
 PLAYBACK_WATCHDOG_RECHECK_SECONDS = 30
@@ -90,6 +98,36 @@ def _cancel_playback_watchdog(chat_id: int) -> None:
         current = None
     if task is not current:
         task.cancel()
+
+
+def _session_token(chat_id: int) -> int:
+    return session_tokens.get(chat_id, 0)
+
+
+def schedule_player_card_removal(chat_id: int, track):
+    """Delete a finished or skipped track's player card without blocking the transition.
+
+    The message references are detached from the track synchronously, so only
+    that track's own card can be deleted and a newer card is never touched.
+    Returns ``(chat_id, message_id)`` of the card being deleted, or None.
+    """
+    if not isinstance(track, dict):
+        return None
+    refs = {key: track.pop(key, None) for key in ("mystic", "player_chat_id", "player_msg_id")}
+    message = refs["mystic"]
+    if not message and not refs["player_msg_id"]:
+        return None
+    location = (
+        refs["player_chat_id"] or getattr(getattr(message, "chat", None), "id", None),
+        refs["player_msg_id"] or getattr(message, "id", None),
+    )
+    try:
+        task = asyncio.get_running_loop().create_task(delete_player_message(chat_id, refs, force=True))
+    except RuntimeError:
+        return None
+    _player_card_tasks.add(task)
+    task.add_done_callback(_player_card_tasks.discard)
+    return location
 
 
 class _SilentMystic:
@@ -127,6 +165,7 @@ def is_too_many_open_files(err: Exception) -> bool:
 
 
 async def _clear_(chat_id: int) -> None:
+    session_tokens[chat_id] = _session_token(chat_id) + 1
     _cancel_playback_watchdog(chat_id)
     playback_recovery_attempts.pop(chat_id, None)
     popped = db.pop(chat_id, None)
@@ -170,6 +209,18 @@ class Call:
             lock = asyncio.Lock()
             self._stream_locks[chat_id] = lock
         return lock
+
+    @staticmethod
+    def session_token(chat_id: int) -> int:
+        """Current playback-session token for ``chat_id`` (changes when the session ends)."""
+        return _session_token(chat_id)
+
+    @staticmethod
+    def _transition_is_stale(chat_id: int, session: int) -> bool:
+        if _session_token(chat_id) == session:
+            return False
+        LOGGER(__name__).info("Dropping stale queue transition | chat=%s", chat_id)
+        return True
 
     @staticmethod
     def _track_signature(track: dict) -> tuple:
@@ -244,6 +295,7 @@ class Call:
         return True
 
     async def _recover_early_stream_end(self, client, chat_id: int) -> bool:
+        session = _session_token(chat_id)
         current = self._watchable_track(chat_id)
         if not current:
             return False
@@ -269,6 +321,8 @@ class Call:
             return False
         if not source_path:
             return False
+        if self._transition_is_stale(chat_id, session):
+            return True
         seek_to = max(played, 0)
         duration = track.get("dur") or seconds_to_min(seconds)
         stream = dynamic_media_stream(source_path, video=video, ffmpeg_params=f"-ss {seconds_to_min(seek_to)} -to {duration}")
@@ -607,6 +661,7 @@ class Call:
     async def _enqueue_autoplay_track(self, chat_id: int, finished_track: dict) -> bool:
         if not finished_track:
             return False
+        session = _session_token(chat_id)
         try:
             if not await get_autoplay(chat_id):
                 return False
@@ -626,6 +681,21 @@ class Call:
             LOGGER(__name__).warning("Autoplay lookup failed | chat=%s | video=%s | error=%s", chat_id, videoid, err)
             return False
         if not recommendation:
+            return False
+        # The lookup above can take several seconds. Re-check what it depended
+        # on, so a stale lookup never adds (or starts) a song after autoplay was
+        # switched off, the session ended, or songs were queued manually.
+        try:
+            if not await get_autoplay(chat_id):
+                LOGGER(__name__).info("Autoplay switched off during lookup; result discarded | chat=%s", chat_id)
+                return False
+        except Exception:
+            return False
+        if _session_token(chat_id) != session or not await is_active_chat(chat_id):
+            LOGGER(__name__).info("Playback session ended during autoplay lookup; result discarded | chat=%s", chat_id)
+            return False
+        if db.get(chat_id):
+            LOGGER(__name__).info("Tracks were queued during autoplay lookup; result discarded | chat=%s", chat_id)
             return False
         try:
             new_vidid = str(recommendation.get("vidid") or "").strip()
@@ -668,15 +738,33 @@ class Call:
             LOGGER(__name__).warning("Autoplay queue add failed | chat=%s | error=%s", chat_id, err)
             return False
 
-    async def _stop_if_queue_empty(self, client, chat_id: int, finished_track=None, allow_autoplay: bool = True) -> bool:
+    async def _stop_if_queue_empty(self, client, chat_id: int, finished_track=None, allow_autoplay: bool = True, on_queue_end=None) -> bool:
+        """End the session if the queue is really empty (after trying autoplay).
+
+        Returns False when there is a track to play next. ``on_queue_end`` is an
+        optional coroutine function run right before the queue-end message,
+        only when this call is the one that ends an active session.
+        """
         if db.get(chat_id):
             return False
+        session = _session_token(chat_id)
         if allow_autoplay and finished_track:
             try:
                 if await self._enqueue_autoplay_track(chat_id, finished_track):
                     return False
             except Exception as err:
                 LOGGER(__name__).warning("Autoplay enqueue exception | chat=%s | error=%s", chat_id, err)
+            # The autoplay attempt may have awaited for a while. An empty
+            # snapshot taken before it is not proof that the queue has ended.
+            if _session_token(chat_id) != session:
+                # Another path already ended this session (or a new one began).
+                return True
+            if db.get(chat_id):
+                # A track was queued meanwhile: keep playing.
+                return False
+        # Only the path that ends a still-active session announces it, so one
+        # ending produces at most one queue-end message.
+        announce = finished_track is not None and await is_active_chat(chat_id)
         await _clear_(chat_id)
         if chat_id in self.active_calls:
             try:
@@ -687,9 +775,36 @@ class Call:
                 pass
             finally:
                 self.active_calls.discard(chat_id)
+        if announce:
+            if on_queue_end is not None:
+                try:
+                    await on_queue_end()
+                except Exception as err:
+                    LOGGER(__name__).warning("Queue-end notice failed | chat=%s | error=%s", chat_id, err)
+            await self._send_queue_end_message(chat_id, finished_track)
         return True
 
-    async def _discard_unplayable_queue_head(self, client, chat_id: int, reason: str) -> bool:
+    async def _send_queue_end_message(self, chat_id: int, finished_track) -> None:
+        # Messages go to the chat the track was requested from (the linked
+        # group in channel-play mode), like the rest of the player messages.
+        notify_chat_id = (finished_track.get("chat_id") if isinstance(finished_track, dict) else None) or chat_id
+        try:
+            _ = get_string(await get_lang(chat_id))
+            buttons = InlineKeyboardMarkup(
+                [
+                    [primary_button(text=_["S_B_1"], url=f"https://t.me/{app.username}?startgroup=true")],
+                    [danger_button(text=_["CLOSE_BUTTON"], callback_data="close")],
+                ]
+            )
+            await app.send_message(notify_chat_id, _["queue_9"], reply_markup=buttons)
+        except Exception as err:
+            LOGGER(__name__).warning("Queue-end message failed | chat=%s | error=%s", notify_chat_id, err)
+
+    async def _discard_unplayable_queue_head(self, client, chat_id: int, reason: str, session: int | None = None) -> bool:
+        if session is not None and self._transition_is_stale(chat_id, session):
+            # The session this transition belonged to has ended; never pop a
+            # newer session's queue.
+            return True
         queue = db.get(chat_id)
         dropped = None
         if queue:
@@ -742,7 +857,14 @@ class Call:
     @capture_internal_err
     async def play(self, client, chat_id: int) -> None:
         _cancel_playback_watchdog(chat_id)
+        session = _session_token(chat_id)
         check = db.get(chat_id)
+        if not check and await is_active_chat(chat_id):
+            # Another transition already took the last track and is still
+            # deciding what comes next (e.g. an autoplay lookup). A duplicate
+            # end event must not clear the session underneath it.
+            LOGGER(__name__).info("Ignoring duplicate stream-end event | chat=%s", chat_id)
+            return
         popped = None
         loop = await get_loop(chat_id)
         try:
@@ -751,6 +873,9 @@ class Call:
             else:
                 loop -= 1
                 await set_loop(chat_id, loop)
+            # The finished track's player card goes with it; a looped track
+            # gets a fresh card when it restarts below.
+            schedule_player_card_removal(chat_id, popped if popped is not None else (check[0] if check else None))
             if popped:
                 await auto_clean(popped)
             if await self._stop_if_queue_empty(client, chat_id, popped, allow_autoplay=True):
@@ -762,13 +887,15 @@ class Call:
             except Exception:
                 return
         while True:
+            if self._transition_is_stale(chat_id, session):
+                return
             check = db.get(chat_id)
             if not check:
                 await self._stop_if_queue_empty(client, chat_id, allow_autoplay=False)
                 return
             current = check[0]
             if not isinstance(current, dict):
-                if await self._discard_unplayable_queue_head(client, chat_id, "malformed queue item"):
+                if await self._discard_unplayable_queue_head(client, chat_id, "malformed queue item", session):
                     return
                 continue
             queued = current.get("file")
@@ -791,7 +918,7 @@ class Call:
                 current["speed"] = 1.0
             video = str(streamtype) == "video"
             if not queued or not isinstance(queued, str):
-                if await self._discard_unplayable_queue_head(client, chat_id, "missing queued stream path"):
+                if await self._discard_unplayable_queue_head(client, chat_id, "missing queued stream path", session):
                     return
                 continue
             if "live_" in queued:
@@ -800,9 +927,11 @@ class Call:
                 except Exception:
                     n, link = 0, None
                 if n == 0 or not link:
-                    if await self._discard_unplayable_queue_head(client, chat_id, "live stream URL was unavailable"):
+                    if await self._discard_unplayable_queue_head(client, chat_id, "live stream URL was unavailable", session):
                         return
                     continue
+                if self._transition_is_stale(chat_id, session):
+                    return
                 try:
                     await self._play_stream(client, chat_id, dynamic_media_stream(link, video=video))
                 except Exception:
@@ -819,21 +948,34 @@ class Call:
                         await mystic.edit_text(_["call_6"], disable_web_page_preview=True)
                     except Exception:
                         pass
-                    if await self._discard_unplayable_queue_head(client, chat_id, "YouTube download returned no playable stream path"):
+                    if await self._discard_unplayable_queue_head(client, chat_id, "YouTube download returned no playable stream path", session):
                         return
                     continue
+                if self._transition_is_stale(chat_id, session):
+                    try:
+                        await mystic.delete()
+                    except Exception:
+                        pass
+                    return
                 try:
                     await self._play_stream(client, chat_id, dynamic_media_stream(file_path, video=video))
                 except Exception:
-                    fallback_path, _, _ = await self._download_youtube_queue_source(videoid, title, mystic, streamtype, modes=("stream",))
+                    # Keep the language strings in "_" intact for the card below.
+                    fallback_path, _fallback_direct, _fallback_mode = await self._download_youtube_queue_source(videoid, title, mystic, streamtype, modes=("stream",))
                     if not fallback_path:
-                        if await self._discard_unplayable_queue_head(client, chat_id, "fallback YouTube download returned no playable stream path"):
+                        if await self._discard_unplayable_queue_head(client, chat_id, "fallback YouTube download returned no playable stream path", session):
                             return
                         continue
+                    if self._transition_is_stale(chat_id, session):
+                        try:
+                            await mystic.delete()
+                        except Exception:
+                            pass
+                        return
                     try:
                         await self._play_stream(client, chat_id, dynamic_media_stream(fallback_path, video=video))
                     except Exception:
-                        if await self._discard_unplayable_queue_head(client, chat_id, "YouTube stream playback failed"):
+                        if await self._discard_unplayable_queue_head(client, chat_id, "YouTube stream playback failed", session):
                             return
                         continue
                 self._schedule_playback_watchdog(client, chat_id)
@@ -847,9 +989,11 @@ class Call:
                 return
             elif "index_" in queued:
                 if not videoid:
-                    if await self._discard_unplayable_queue_head(client, chat_id, "index stream URL was missing"):
+                    if await self._discard_unplayable_queue_head(client, chat_id, "index stream URL was missing", session):
                         return
                     continue
+                if self._transition_is_stale(chat_id, session):
+                    return
                 try:
                     await self._play_stream(client, chat_id, dynamic_media_stream(videoid, video=video))
                 except Exception:
@@ -875,6 +1019,8 @@ class Call:
                         ) or queued
                     except Exception:
                         source = queued
+                if self._transition_is_stale(chat_id, session):
+                    return
                 try:
                     await self._play_stream(client, chat_id, dynamic_media_stream(source, video=video))
                 except Exception:

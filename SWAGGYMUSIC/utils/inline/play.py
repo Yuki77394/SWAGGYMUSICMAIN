@@ -5,90 +5,22 @@
 # Released under GNU v3.0 License Agreement.
 #
 
-import time
-import random
 from typing import Union
 
-from pyrogram.enums import ButtonStyle
-from pyrogram.types import InlineKeyboardButton
-
-from SWAGGYMUSIC import app
-from SWAGGYMUSIC.utils.formatters import time_to_seconds
-
-
-# ==========================================================
-# RANDOM BUTTON STYLE
-# ==========================================================
-BUTTON_STYLES = [
-    ButtonStyle.PRIMARY,
-    ButtonStyle.SUCCESS,
-    ButtonStyle.DANGER,
-]
-
-
-def random_button(text, callback_data=None, url=None):
-    return InlineKeyboardButton(
-        text=text,
-        callback_data=callback_data,
-        url=url,
-        style=random.choice(BUTTON_STYLES),
-    )
+from SWAGGYMUSIC.button_styles import (
+    danger_button,
+    primary_button,
+    success_button,
+)
 
 
 # ==========================================================
-# PROGRESS UPDATE CACHE
+# FIXED BUTTON STYLES
+#
+# Layouts and styles mirror KURIGRAMSWAG's utils/inline/play.py.
+# Every button has one fixed style, so colours never change
+# between renders.
 # ==========================================================
-
-LAST_UPDATE_TIME = {}
-
-
-def should_update_progress(chat_id):
-    now = time.time()
-    last = LAST_UPDATE_TIME.get(chat_id, 0)
-
-    if now - last >= 6:
-        LAST_UPDATE_TIME[chat_id] = now
-        return True
-
-    return False
-
-
-def reset_progress(chat_id):
-    LAST_UPDATE_TIME.pop(chat_id, None)
-
-
-# ==========================================================
-# PROGRESS BAR
-# ==========================================================
-
-def generate_progress_bar(played_sec, duration_sec):
-    if not duration_sec or duration_sec <= 0:
-        percentage = 0
-    else:
-        percentage = (played_sec / duration_sec) * 100
-        percentage = min(max(percentage, 0), 100)
-
-    bar_length = 9
-
-    filled = int(
-        round(
-            bar_length * percentage / 100
-        )
-    )
-
-    filled = max(
-        0,
-        min(
-            filled,
-            bar_length,
-        ),
-    )
-
-    return (
-        "—" * filled
-        + "♬"
-        + "—" * (bar_length - filled)
-    )
 
 
 # ==========================================================
@@ -105,14 +37,14 @@ def track_markup(
 ):
     return [
         [
-            random_button(
+            primary_button(
                 text="🎵",
                 callback_data=(
                     f"MusicStream "
                     f"{videoid}|{user_id}|a|{channel}|{fplay}"
                 ),
             ),
-            random_button(
+            primary_button(
                 text="🎥",
                 callback_data=(
                     f"MusicStream "
@@ -121,7 +53,7 @@ def track_markup(
             ),
         ],
         [
-            random_button(
+            success_button(
                 text="⎘",
                 callback_data=(
                     f"MusicThumb "
@@ -129,7 +61,7 @@ def track_markup(
                     f"{channel}|{fplay}"
                 ),
             ),
-            random_button(
+            danger_button(
                 text="⌯✖",
                 callback_data=(
                     f"forceclose {videoid}|{user_id}"
@@ -140,145 +72,95 @@ def track_markup(
 
 
 # ==========================================================
-# PLAYER CONTROLS
+# PLAYER KEYBOARD
+#
+# Normal player:
+#     ▷   II   ‣‣I   ↻   ▢        (PRIMARY)
+#     ☰ ᴍᴏʀᴇ (SUCCESS)   🗑 (DANGER)
+#
+# MORE menu (controls row stays on top):
+#     ▷   II   ‣‣I   ↻   ▢        (PRIMARY)
+#     Autoplay / ♫   Thumb / ⎘    (PRIMARY)
+#     ⟵ ʙᴀᴄᴋ (SUCCESS)   🗑 (DANGER)
 # ==========================================================
 
-def player_controls(_, chat_id):
+def _player_controls_row(chat_id):
     return [
-        [
-            random_button(
-                text="▷",
-                callback_data=(
-                    f"ADMIN Resume|{chat_id}"
-                ),
-            ),
-            random_button(
-                text="II",
-                callback_data=(
-                    f"ADMIN Pause|{chat_id}"
-                ),
-            ),
-            random_button(
-                text="‣‣I",
-                callback_data=(
-                    f"ADMIN Skip|{chat_id}"
-                ),
-            ),
-            random_button(
-                text="↻",
-                callback_data=(
-                    f"ADMIN Replay|{chat_id}"
-                ),
-            ),
-            random_button(
-                text="▢",
-                callback_data=(
-                    f"ADMIN Stop|{chat_id}"
-                ),
-            ),
-        ],
-        [
-            random_button(
-                text="☰",
-                callback_data=(
-                    f"ADMIN More|{chat_id}"
-                ),
-            ),
-            random_button(
-                text="🗑",
-                callback_data="close",
-            ),
-        ],
+        primary_button(
+            text="▷",
+            callback_data=f"ADMIN Resume|{chat_id}",
+        ),
+        primary_button(
+            text="II",
+            callback_data=f"ADMIN Pause|{chat_id}",
+        ),
+        primary_button(
+            text="‣‣I",
+            callback_data=f"ADMIN Skip|{chat_id}",
+        ),
+        primary_button(
+            text="↻",
+            callback_data=f"ADMIN Replay|{chat_id}",
+        ),
+        primary_button(
+            text="▢",
+            callback_data=f"ADMIN Stop|{chat_id}",
+        ),
     ]
 
 
-# ==========================================================
-# MORE MENU
-#
-# EXACT LAYOUT:
-#
-#        ♫       ⎘
-#
-#       ⟵       🗑
-#
-# ==========================================================
-
-def more_player_markup(_, chat_id):
-    return [
-        [
-            random_button(
-                text="♫",
-                callback_data=(
-                    f"ADMIN Autoplay|{chat_id}"
-                ),
-            ),
-            random_button(
-                text="⎘",
-                callback_data=(
-                    f"ADMIN Thumb|{chat_id}"
-                ),
-            ),
-        ],
-        [
-            random_button(
-                text="⟵",
-                callback_data=(
-                    f"ADMIN Back|{chat_id}"
-                ),
-            ),
-            random_button(
-                text="🗑",
-                callback_data="close",
-            ),
-        ],
-    ]
-
-
-# ==========================================================
-# CONTROL BUTTONS
-# ==========================================================
-
-def control_buttons(
-    _,
+def _player_buttons(
     chat_id,
-    autoplay: Union[bool, str] = False,
-    thumb: Union[bool, str] = False,
-    more: bool = False,
+    more: bool,
+    autoplay_text: str,
+    thumb_text: str,
 ):
     if not more:
-        return player_controls(_, chat_id)
+        return [
+            _player_controls_row(chat_id),
+            [
+                success_button(
+                    text="☰ ᴍᴏʀᴇ",
+                    callback_data=f"ADMIN More|{chat_id}",
+                ),
+                danger_button(
+                    text="🗑",
+                    callback_data="close",
+                ),
+            ],
+        ]
 
-    return more_player_markup(_, chat_id)
-
-
-# ==========================================================
-# MORE MARKUP
-# ==========================================================
-
-def more_markup(
-    _,
-    chat_id,
-    autoplay: Union[bool, str] = False,
-    thumb: Union[bool, str] = False,
-):
-    return more_player_markup(_, chat_id)
-
-
-# ==========================================================
-# COMPACT MORE MARKUP
-# ==========================================================
-
-def more_markup_compact(
-    _,
-    chat_id,
-    autoplay: Union[bool, str] = False,
-    thumb: Union[bool, str] = False,
-):
-    return more_player_markup(_, chat_id)
+    return [
+        _player_controls_row(chat_id),
+        [
+            primary_button(
+                text=autoplay_text,
+                callback_data=f"ADMIN Autoplay|{chat_id}",
+            ),
+            primary_button(
+                text=thumb_text,
+                callback_data=f"ADMIN Thumb|{chat_id}",
+            ),
+        ],
+        [
+            success_button(
+                text="⟵ ʙᴀᴄᴋ",
+                callback_data=f"ADMIN Back|{chat_id}",
+            ),
+            danger_button(
+                text="🗑",
+                callback_data="close",
+            ),
+        ],
+    ]
 
 
 # ==========================================================
 # STREAM TIMER MARKUP
+#
+# Used for tracks with a known duration. KURIGRAMSWAG shows the
+# same static player here (no progress row); its MORE row is
+# labelled "Autoplay" / "Thumb".
 # ==========================================================
 
 def stream_markup_timer(
@@ -286,128 +168,39 @@ def stream_markup_timer(
     chat_id,
     played,
     dur,
-    autoplay: Union[bool, str] = False,
-    thumb: Union[bool, str] = False,
+    autoplay: Union[bool, str] = None,
+    thumb: Union[bool, str] = None,
     chat_filter: Union[bool, str] = None,
     more: bool = False,
 ):
-    # ------------------------------------------------------
-    # Progress update limit
-    # ------------------------------------------------------
-
-    if not should_update_progress(chat_id):
-        return None
-
-    # ------------------------------------------------------
-    # Convert time
-    # ------------------------------------------------------
-
-    try:
-        played_sec = time_to_seconds(played)
-    except Exception:
-        played_sec = 0
-
-    try:
-        duration_sec = time_to_seconds(dur)
-    except Exception:
-        duration_sec = 0
-
-    # ------------------------------------------------------
-    # Remaining time
-    # ------------------------------------------------------
-
-    remaining_sec = duration_sec - played_sec
-
-    if remaining_sec < 0:
-        remaining_sec = 0
-
-    rem_min = remaining_sec // 60
-    rem_sec = remaining_sec % 60
-
-    remaining = (
-        f"{rem_min:02d}:"
-        f"{rem_sec:02d}"
+    return _player_buttons(
+        chat_id,
+        more,
+        autoplay_text="Autoplay",
+        thumb_text="Thumb",
     )
-
-    # ------------------------------------------------------
-    # Progress bar
-    # ------------------------------------------------------
-
-    bar = generate_progress_bar(
-        played_sec,
-        duration_sec,
-    )
-
-    # ------------------------------------------------------
-    # Timer button
-    # ------------------------------------------------------
-
-    buttons = [
-        [
-            random_button(
-                text=(
-                    f"{played} "
-                    f"{bar} "
-                    f"{remaining}"
-                ),
-                url=(
-                    f"https://t.me/"
-                    f"{app.username}"
-                    f"?startgroup=true"
-                ),
-            )
-        ]
-    ]
-
-    # ------------------------------------------------------
-    # Normal player
-    # ------------------------------------------------------
-
-    if not more:
-        buttons.extend(
-            player_controls(
-                _,
-                chat_id,
-            )
-        )
-
-        return buttons
-
-    # ------------------------------------------------------
-    # More menu
-    # ------------------------------------------------------
-
-    buttons.extend(
-        more_player_markup(
-            _,
-            chat_id,
-        )
-    )
-
-    return buttons
 
 
 # ==========================================================
 # NORMAL STREAM MARKUP
+#
+# Used when the player is first sent and for live streams.
+# Its MORE row uses the ♫ / ⎘ symbols, as in KURIGRAMSWAG.
 # ==========================================================
 
 def stream_markup(
     _,
     chat_id,
-    autoplay: Union[bool, str] = False,
-    thumb: Union[bool, str] = False,
+    autoplay: Union[bool, str] = None,
+    thumb: Union[bool, str] = None,
     chat_filter: Union[bool, str] = None,
     more: bool = False,
 ):
-    if not more:
-        return player_controls(
-            _,
-            chat_id,
-        )
-
-    return more_player_markup(
-        _,
+    return _player_buttons(
         chat_id,
+        more,
+        autoplay_text="♫",
+        thumb_text="⎘",
     )
 
 
@@ -426,7 +219,7 @@ def playlist_markup(
 ):
     return [
         [
-            random_button(
+            primary_button(
                 text="🎵",
                 callback_data=(
                     f"AlonePlaylists "
@@ -437,7 +230,7 @@ def playlist_markup(
                     f"{fplay}"
                 ),
             ),
-            random_button(
+            primary_button(
                 text="🎥",
                 callback_data=(
                     f"AlonePlaylists "
@@ -450,7 +243,7 @@ def playlist_markup(
             ),
         ],
         [
-            random_button(
+            success_button(
                 text="⎘",
                 callback_data=(
                     f"PlaylistThumb "
@@ -461,7 +254,7 @@ def playlist_markup(
                     f"{fplay}"
                 ),
             ),
-            random_button(
+            danger_button(
                 text="✖",
                 callback_data=(
                     f"forceclose "
@@ -487,7 +280,7 @@ def livestream_markup(
 ):
     return [
         [
-            random_button(
+            primary_button(
                 text="🎬",
                 callback_data=(
                     f"LiveStream "
@@ -500,7 +293,7 @@ def livestream_markup(
             ),
         ],
         [
-            random_button(
+            success_button(
                 text="⎘",
                 callback_data=(
                     f"LiveThumb "
@@ -511,7 +304,7 @@ def livestream_markup(
                     f"{fplay}"
                 ),
             ),
-            random_button(
+            danger_button(
                 text="✖",
                 callback_data=(
                     f"forceclose "
@@ -540,7 +333,7 @@ def slider_markup(
 
     return [
         [
-            random_button(
+            primary_button(
                 text="🎵",
                 callback_data=(
                     f"MusicStream "
@@ -550,7 +343,7 @@ def slider_markup(
                     f"{fplay}"
                 ),
             ),
-            random_button(
+            primary_button(
                 text="🎥",
                 callback_data=(
                     f"MusicStream "
@@ -562,7 +355,7 @@ def slider_markup(
             ),
         ],
         [
-            random_button(
+            success_button(
                 text="◁",
                 callback_data=(
                     f"slider B|"
@@ -573,7 +366,7 @@ def slider_markup(
                     f"{fplay}"
                 ),
             ),
-            random_button(
+            success_button(
                 text="⎘",
                 callback_data=(
                     f"SliderThumb "
@@ -585,7 +378,7 @@ def slider_markup(
                     f"{fplay}"
                 ),
             ),
-            random_button(
+            success_button(
                 text="▷",
                 callback_data=(
                     f"slider F|"
@@ -598,7 +391,7 @@ def slider_markup(
             ),
         ],
         [
-            random_button(
+            danger_button(
                 text="✖",
                 callback_data=(
                     f"forceclose "

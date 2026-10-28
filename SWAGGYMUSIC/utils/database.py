@@ -277,6 +277,30 @@ async def set_upvotes(chat_id: int, mode: int):
 # AUTOPLAY
 # =========================================================
 
+_AUTOPLAY_ON_VALUES = {"1", "true", "on", "yes", "enable", "enabled"}
+
+
+def _stored_autoplay_mode(value) -> bool:
+    """
+    Interpret a stored autoplay value.
+
+    Only an explicit ON value enables autoplay. A missing, empty or
+    unrecognised value (for example the string "False", which bool()
+    would treat as True) is OFF.
+    """
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, int):
+        return value == 1
+
+    if isinstance(value, str):
+        return value.strip().lower() in _AUTOPLAY_ON_VALUES
+
+    return False
+
+
 async def get_autoplay(chat_id: int) -> bool:
     """
     Get autoplay status.
@@ -294,7 +318,7 @@ async def get_autoplay(chat_id: int) -> bool:
             autoplay[chat_id] = False
             return False
 
-        mode = bool(data.get("mode", False))
+        mode = _stored_autoplay_mode(data.get("mode"))
         autoplay[chat_id] = mode
 
         return mode
@@ -305,17 +329,20 @@ async def get_autoplay(chat_id: int) -> bool:
 async def set_autoplay(chat_id: int, mode: bool):
     """
     Enable or disable autoplay.
+
+    The database is written first so the in-memory cache never reports a
+    state that failed to persist.
     """
 
     enabled = bool(mode)
-
-    autoplay[chat_id] = enabled
 
     await autoplaydb.update_one(
         {"chat_id": chat_id},
         {"$set": {"mode": enabled}},
         upsert=True,
     )
+
+    autoplay[chat_id] = enabled
 
 
 # OLD FUNCTION COMPATIBILITY

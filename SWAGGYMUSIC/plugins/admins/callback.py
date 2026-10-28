@@ -2,6 +2,7 @@ import asyncio
 import random
 
 from pyrogram import filters
+from pyrogram.errors import MessageNotModified
 from pyrogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -24,13 +25,14 @@ from config import (
 from strings import get_string
 
 from SWAGGYMUSIC import YouTube, app
-from SWAGGYMUSIC.core.call import JARVIS
+from SWAGGYMUSIC.core.call import JARVIS, schedule_player_card_removal
 from SWAGGYMUSIC.misc import SUDOERS, db
 
 from SWAGGYMUSIC.utils.database import (
     get_active_chats,
     get_assistant,
     get_lang,
+    group_assistant,
     get_upvote_count,
     is_active_chat,
     is_music_playing,
@@ -117,6 +119,32 @@ async def _safe_reply_callback_message(
             return None
 
 
+async def _show_skip_notice(
+    callback: CallbackQuery,
+    text: str,
+    reply_markup=None,
+    as_new_message: bool = False,
+):
+    # When the pressed message was the skipped song's player card,
+    # that card has been deleted: post the notice as a new message
+    # instead of editing it.
+    if as_new_message:
+        try:
+            return await app.send_message(
+                callback.message.chat.id,
+                text,
+                reply_markup=reply_markup,
+            )
+        except Exception:
+            return None
+
+    await _safe_edit_callback_message(
+        callback,
+        text,
+        reply_markup=reply_markup,
+    )
+
+
 def parse_chat_info(chat_info: str):
     if "_" in chat_info:
         parts = chat_info.split("_", 1)
@@ -154,100 +182,80 @@ async def _player_is_admin(
 
 
 # ==========================================================
-# PLAYER MORE MENU
+# PLAYER KEYBOARD (NORMAL / MORE)
+#
+# Rendered with the shared builders in utils/inline/play.py,
+# the same way KURIGRAMSWAG does it: the timed layout for
+# tracks with a known duration, the plain one otherwise.
 # ==========================================================
 
-def player_more_markup(chat_id: int):
+def _current_track(chat_id: int):
+    playing = db.get(chat_id)
 
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    text="▷",
-                    callback_data=f"ADMIN Resume|{chat_id}",
-                ),
-                InlineKeyboardButton(
-                    text="II",
-                    callback_data=f"ADMIN Pause|{chat_id}",
-                ),
-                InlineKeyboardButton(
-                    text="‣‣I",
-                    callback_data=f"ADMIN Skip|{chat_id}",
-                ),
-                InlineKeyboardButton(
-                    text="↻",
-                    callback_data=f"ADMIN Replay|{chat_id}",
-                ),
-                InlineKeyboardButton(
-                    text="▢",
-                    callback_data=f"ADMIN Stop|{chat_id}",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text="♫",
-                    callback_data=f"ADMIN Autoplay|{chat_id}",
-                ),
-                InlineKeyboardButton(
-                    text="⎘",
-                    callback_data=f"ADMIN Thumb|{chat_id}",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text="← BACK",
-                    callback_data=f"ADMIN Back|{chat_id}",
-                ),
-                InlineKeyboardButton(
-                    text="🗑",
-                    callback_data="close",
-                ),
-            ],
-        ]
-    )
+    if playing and isinstance(playing[0], dict):
+        return playing[0]
+
+    return None
 
 
-# ==========================================================
-# NORMAL PLAYER MENU
-# ==========================================================
+def _player_message_id(track) -> int | None:
+    mystic = track.get("mystic")
+    message_id = getattr(mystic, "id", None) or track.get("player_msg_id")
 
-def player_normal_markup(chat_id: int):
+    try:
+        return int(message_id) if message_id else None
+    except (TypeError, ValueError):
+        return None
 
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton(
-                    text="▷",
-                    callback_data=f"ADMIN Resume|{chat_id}",
-                ),
-                InlineKeyboardButton(
-                    text="II",
-                    callback_data=f"ADMIN Pause|{chat_id}",
-                ),
-                InlineKeyboardButton(
-                    text="‣‣I",
-                    callback_data=f"ADMIN Skip|{chat_id}",
-                ),
-                InlineKeyboardButton(
-                    text="↻",
-                    callback_data=f"ADMIN Replay|{chat_id}",
-                ),
-                InlineKeyboardButton(
-                    text="▢",
-                    callback_data=f"ADMIN Stop|{chat_id}",
-                ),
-            ],
-            [
-                InlineKeyboardButton(
-                    text="☰",
-                    callback_data=f"ADMIN More|{chat_id}",
-                ),
-                InlineKeyboardButton(
-                    text="🗑",
-                    callback_data="close",
-                ),
-            ],
-        ]
+
+def _player_markup(_, chat_id: int, more: bool) -> InlineKeyboardMarkup:
+    track = _current_track(chat_id)
+
+    try:
+        duration_seconds = int(track["seconds"]) if track else 0
+        played = seconds_to_min(track.get("played") or 0) if duration_seconds else None
+    except Exception:
+        duration_seconds, played = 0, None
+
+    if duration_seconds == 0:
+        buttons = stream_markup(
+            _,
+            chat_id,
+            more=more,
+        )
+    else:
+        buttons = stream_markup_timer(
+            _,
+            chat_id,
+            played,
+            track.get("dur"),
+            more=more,
+        )
+
+    return InlineKeyboardMarkup(buttons)
+
+
+def _remember_more_state(chat_id: int, message, more: bool) -> None:
+    # Like KURIGRAMSWAG, keep the MORE state on the current track so the
+    # periodic markup refresh keeps the menu open. It is tied to the current
+    # player message, so pressing buttons on an older message changes nothing.
+    track = _current_track(chat_id)
+
+    if not track:
+        return
+
+    message_id = getattr(message, "id", None)
+
+    if message_id is None or _player_message_id(track) != message_id:
+        return
+
+    track["more"] = more
+    track["more_msg_id"] = message_id
+
+
+def _more_state(track) -> bool:
+    return bool(track.get("more")) and (
+        track.get("more_msg_id") == _player_message_id(track)
     )
 
 
@@ -495,13 +503,24 @@ async def player_more_callback(
 
     await callback.answer()
 
+    _remember_more_state(
+        chat_id,
+        callback.message,
+        True,
+    )
+
     try:
 
         await callback.message.edit_reply_markup(
-            reply_markup=player_more_markup(
-                chat_id
+            reply_markup=_player_markup(
+                None,
+                chat_id,
+                more=True,
             )
         )
+
+    except MessageNotModified:
+        pass
 
     except Exception as e:
 
@@ -548,13 +567,24 @@ async def player_back_callback(
 
     await callback.answer()
 
+    _remember_more_state(
+        chat_id,
+        callback.message,
+        False,
+    )
+
     try:
 
         await callback.message.edit_reply_markup(
-            reply_markup=player_normal_markup(
-                chat_id
+            reply_markup=_player_markup(
+                None,
+                chat_id,
+                more=False,
             )
         )
+
+    except MessageNotModified:
+        pass
 
     except Exception as e:
 
@@ -965,11 +995,25 @@ async def manage_callback(
         # ----------------------------------------------
         # NO MESSAGE EDIT
         # NO SETTINGS SCREEN
+        #
+        # Report the state read back from the store,
+        # so the confirmation always matches the
+        # setting that is actually in effect.
         # ----------------------------------------------
+
+        try:
+
+            enabled = await is_autoplay_on(
+                chat_id
+            )
+
+        except Exception:
+
+            enabled = not current
 
         await callback.answer(
             "🟢 AUTO PLAY ON"
-            if not current
+            if enabled
             else "🔴 AUTO PLAY OFF",
             show_alert=False,
         )
@@ -977,8 +1021,10 @@ async def manage_callback(
         try:
 
             await callback.message.edit_reply_markup(
-                reply_markup=player_more_markup(
-                    chat_id
+                reply_markup=_player_markup(
+                    _,
+                    chat_id,
+                    more=True,
                 )
             )
 
@@ -1007,13 +1053,24 @@ async def manage_callback(
 
         await callback.answer()
 
+        _remember_more_state(
+            chat_id,
+            callback.message,
+            False,
+        )
+
         try:
 
             await callback.message.edit_reply_markup(
-                reply_markup=player_normal_markup(
-                    chat_id
+                reply_markup=_player_markup(
+                    _,
+                    chat_id,
+                    more=False,
                 )
             )
+
+        except MessageNotModified:
+            pass
 
         except Exception as e:
 
@@ -1098,6 +1155,17 @@ async def handle_skip_replay(
             show_alert=True,
         )
 
+    # Work below awaits (autoplay lookup, downloads). If the
+    # session ends meanwhile (/stop, or a newer session), this
+    # handler must not touch it.
+    session = JARVIS.session_token(
+        chat_id
+    )
+
+    # True when the pressed message is the skipped song's player
+    # card, which is deleted below.
+    notice_as_new_message = False
+
     if command == "Skip":
 
         text_msg = (
@@ -1112,74 +1180,96 @@ async def handle_skip_replay(
                 0
             )
 
+            # The skipped song's player card is always removed,
+            # whatever /autodelete says. Only that track's own
+            # card is touched (its references are detached here).
+            removed_card = schedule_player_card_removal(
+                chat_id,
+                popped,
+            )
+
+            notice_as_new_message = removed_card == (
+                callback.message.chat.id,
+                callback.message.id,
+            )
+
             if popped:
                 await auto_clean(
                     popped
                 )
 
+            if JARVIS.session_token(chat_id) != session:
+                # Stopped or replaced meanwhile.
+                try:
+                    await callback.answer()
+                except Exception:
+                    pass
+                return
+
             # --------------------------------------------------
             # QUEUE EMPTY
+            #
+            # Same core step a natural track end uses: autoplay,
+            # or a /play that lands meanwhile, may still provide
+            # a next track. Otherwise it ends the session and
+            # sends the queue-end message once.
             # --------------------------------------------------
 
-            if not playlist:
+            if not db.get(chat_id):
 
-                # IMPORTANT:
-                # Do not kill autoplay here if autoplay is ON.
-                # Call core skip handler first.
+                # The related-song lookup can take a moment.
                 try:
-
-                    autoplay_enabled = (
-                        await is_autoplay_on(
-                            chat_id
-                        )
-                    )
-
-                except Exception:
-
-                    autoplay_enabled = False
-
-                if autoplay_enabled:
-
                     await callback.answer()
+                except Exception:
+                    pass
 
-                    try:
-                        await _safe_edit_callback_message(
+                skip_end_text = _["admin_6"].format(
+                    user_mention,
+                    callback.message.chat.title,
+                )
+
+                async def announce_skip_to_end():
+                    if notice_as_new_message:
+                        await _show_skip_notice(
                             callback,
-                            text_msg,
+                            skip_end_text,
                             reply_markup=close_markup(_),
-                        )
-                    except Exception:
-                        pass
-
-                    # Let JARVIS/core autoplay logic continue.
-                    try:
-                        await JARVIS.skip_stream(
-                            chat_id,
-                            None,
+                            as_new_message=True,
                         )
                         return
-                    except Exception:
-                        # If the core does not accept None,
-                        # stop only as final fallback.
-                        pass
 
-                await _safe_edit_callback_message(
-                    callback,
-                    text_msg,
+                    await _safe_edit_callback_message(
+                        callback,
+                        text_msg,
+                    )
+
+                    await _safe_reply_callback_message(
+                        callback,
+                        skip_end_text,
+                        reply_markup=close_markup(_),
+                    )
+
+                assistant = await group_assistant(
+                    JARVIS,
+                    chat_id,
                 )
 
-                await _safe_reply_callback_message(
-                    callback,
-                    _["admin_6"].format(
-                        user_mention,
-                        callback.message.chat.title,
-                    ),
-                    reply_markup=close_markup(_),
-                )
+                if await JARVIS._stop_if_queue_empty(
+                    assistant,
+                    chat_id,
+                    popped,
+                    allow_autoplay=True,
+                    on_queue_end=announce_skip_to_end,
+                ):
+                    return
 
-                return await JARVIS.stop_stream(
-                    chat_id
-                )
+                if JARVIS.session_token(chat_id) != session:
+                    return
+
+            # A next track exists (queued, or added by autoplay).
+            playlist = db.get(
+                chat_id
+            )
 
         except Exception as e:
 
@@ -1219,7 +1309,11 @@ async def handle_skip_replay(
             f"└ʙʏ : {user_mention} 🥀"
         )
 
-    await callback.answer()
+    try:
+        await callback.answer()
+    except Exception:
+        # Already answered (e.g. during an autoplay lookup).
+        pass
 
     if not playlist:
 
@@ -1345,6 +1439,9 @@ async def handle_skip_replay(
 
             image = None
 
+        if JARVIS._transition_is_stale(chat_id, session):
+            return
+
         try:
 
             await JARVIS.skip_stream(
@@ -1384,10 +1481,11 @@ async def handle_skip_replay(
             markup="tg",
         )
 
-        await _safe_edit_callback_message(
+        await _show_skip_notice(
             callback,
             text_msg,
             reply_markup=close_markup(_),
+            as_new_message=notice_as_new_message,
         )
 
     # ======================================================
@@ -1430,6 +1528,13 @@ async def handle_skip_replay(
         except Exception:
 
             image = None
+
+        if JARVIS._transition_is_stale(chat_id, session):
+            try:
+                await mystic.delete()
+            except Exception:
+                pass
+            return
 
         try:
 
@@ -1475,6 +1580,13 @@ async def handle_skip_replay(
             file_path = fallback_path
             direct = fallback_direct
 
+            if JARVIS._transition_is_stale(chat_id, session):
+                try:
+                    await mystic.delete()
+                except Exception:
+                    pass
+                return
+
             try:
 
                 await JARVIS.skip_stream(
@@ -1514,10 +1626,11 @@ async def handle_skip_replay(
             markup="stream",
         )
 
-        await _safe_edit_callback_message(
+        await _show_skip_notice(
             callback,
             text_msg,
             reply_markup=close_markup(_),
+            as_new_message=notice_as_new_message,
         )
 
         try:
@@ -1530,6 +1643,9 @@ async def handle_skip_replay(
     # ======================================================
 
     elif "index_" in queued:
+
+        if JARVIS._transition_is_stale(chat_id, session):
+            return
 
         try:
 
@@ -1573,10 +1689,11 @@ async def handle_skip_replay(
             "markup"
         ] = "tg"
 
-        await _safe_edit_callback_message(
+        await _show_skip_notice(
             callback,
             text_msg,
             reply_markup=close_markup(_),
+            as_new_message=notice_as_new_message,
         )
 
     # ======================================================
@@ -1604,6 +1721,9 @@ async def handle_skip_replay(
             except Exception:
 
                 image = None
+
+        if JARVIS._transition_is_stale(chat_id, session):
+            return
 
         try:
 
@@ -1710,10 +1830,11 @@ async def handle_skip_replay(
                 markup="stream",
             )
 
-        await _safe_edit_callback_message(
+        await _show_skip_notice(
             callback,
             text_msg,
             reply_markup=close_markup(_),
+            as_new_message=notice_as_new_message,
         )
 
 
@@ -2001,6 +2122,26 @@ async def markup_timer():
 
                 try:
 
+                    # Keep the MORE menu open while it is
+                    # selected (KURIGRAMSWAG passes the same
+                    # "more" state here).
+                    more = _more_state(
+                        playing[0]
+                    )
+
+                    # The player layout is static, so only
+                    # edit when this message's keyboard
+                    # would actually change.
+                    signature = (
+                        mystic.id,
+                        more,
+                    )
+
+                    if playing[0].get(
+                        "timer_markup"
+                    ) == signature:
+                        continue
+
                     buttons = (
                         stream_markup_timer(
                             _lang,
@@ -2013,16 +2154,24 @@ async def markup_timer():
                             playing[0][
                                 "dur"
                             ],
+                            more=more,
                         )
                     )
 
-                    if buttons:
+                    try:
 
                         await mystic.edit_reply_markup(
                             reply_markup=InlineKeyboardMarkup(
                                 buttons
                             )
                         )
+
+                    except MessageNotModified:
+                        pass
+
+                    playing[0][
+                        "timer_markup"
+                    ] = signature
 
                 except Exception:
 

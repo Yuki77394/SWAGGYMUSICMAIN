@@ -39,7 +39,7 @@ python-whois
 # py-yt-search provides the async VideosSearch API (await .next());
 # replaces youtube-search-python whose .future submodule was removed in 1.6.x
 # and whose sync API is incompatible with httpx==0.28.1 (proxies kwarg removed).
-py-yt-search==0.8.0
+py-yt-search==0.8.1
 yt-dlp
 
 PyYAML

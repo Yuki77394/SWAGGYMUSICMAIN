@@ -19,25 +19,41 @@ _DIRECT_INFO_CACHE: dict[str, dict] = {}
 _DIRECT_URL_CACHE_TTL = 8 * 60
 
 
+async def exact_video_result(video_id: str, timeout: float = None) -> dict:
+    """The YouTube search result that IS ``video_id``, or {} if none is.
+
+    A search by video id returns YouTube's ranking, which can put other
+    videos (often live streams) first. Only a result whose own id matches
+    may supply this video's title, duration, views or thumbnail.
+    """
+    try:
+        search = VideosSearch(video_id, limit=10).next()
+        if timeout:
+            search = asyncio.wait_for(search, timeout=timeout)
+        results = (await search).get("result") or []
+    except Exception:
+        return {}
+    for item in results:
+        if isinstance(item, dict) and item.get("id") == video_id:
+            return item
+    return {}
+
+
 async def _search_video_metadata(video_id: str) -> dict:
     """Fast metadata fallback when YouTube's media extractor is blocked.
 
-    Search by the 11-character ID, never by the full URL. This avoids the
-    old behaviour where a direct URL was accidentally treated as a search.
+    Search by the 11-character ID, never by the full URL, and accept only
+    the result for that very video (see exact_video_result).
     """
     try:
-        result = (await asyncio.wait_for(
-            VideosSearch(video_id, limit=1).next(),
-            timeout=2.5,
-        )).get("result") or []
-        if not result:
+        item = await exact_video_result(video_id, timeout=2.5)
+        if not item:
             return {}
-        item = result[0]
         return {
             "title": item.get("title") or "",
             "duration": int(time_to_seconds(item.get("duration"))) if item.get("duration") else 0,
             "thumbnail": ((item.get("thumbnails") or [{}])[0].get("url") or "").split("?")[0],
-            "id": item.get("id") or video_id,
+            "id": video_id,
         }
     except Exception:
         return {}
@@ -77,6 +93,22 @@ def _youtube_video_id(value: str) -> str | None:
     if re.fullmatch(r"[A-Za-z0-9_-]{11}", value):
         return value
     return None
+
+
+_EXACT_VIDEO_LINK = re.compile(
+    r"(?:[?&]v=|youtu\.be/|youtube\.com/(?:shorts|embed|live)/)([A-Za-z0-9_-]{11})(?=$|[?&#/])"
+)
+
+
+def _exact_video_id(link: str) -> str | None:
+    """The id of a real link to one YouTube video, else None.
+
+    Stricter than _youtube_video_id: search text glued onto a watch URL
+    (e.g. "...watch?v=Butterflies Artist" from a Spotify playlist) is not
+    mistaken for the video "Butterflies".
+    """
+    match = _EXACT_VIDEO_LINK.search(str(link or ""))
+    return match.group(1) if match else None
 
 
 def _canonical_youtube_url(value: str) -> str:
@@ -302,6 +334,24 @@ class YouTubeAPI:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
+        direct_id = _exact_video_id(link)
+        if direct_id:
+            # A specific video was asked for (e.g. a playlist entry): its id is
+            # authoritative and only its own metadata may be used.
+            item = await exact_video_result(direct_id)
+            if item:
+                title = item.get("title") or ""
+                duration_min = item.get("duration")
+                thumbnail = (item.get("thumbnails") or [{}])[0].get("url") or ""
+            else:
+                title = await _oembed_title(direct_id)
+                if not title:
+                    raise ValueError(f"YouTube video {direct_id} could not be verified")
+                duration_min = "00:00"  # unknown, as in track()
+                thumbnail = ""
+            thumbnail = (thumbnail or f"https://i.ytimg.com/vi/{direct_id}/hqdefault.jpg").split("?")[0]
+            duration_sec = int(time_to_seconds(duration_min)) if duration_min else 0
+            return title, duration_min, duration_sec, thumbnail, direct_id
         results = VideosSearch(link, limit=1)
         for result in (await results.next())["result"]:
             title = result["title"]
@@ -334,6 +384,10 @@ class YouTubeAPI:
             link = self.base + link
         if "&" in link:
             link = link.split("&")[0]
+        direct_id = _exact_video_id(link)
+        if direct_id:
+            # The picture of exactly this video; searching could return another.
+            return f"https://i.ytimg.com/vi/{direct_id}/hqdefault.jpg"
         results = VideosSearch(link, limit=1)
         for result in (await results.next())["result"]:
             return result["thumbnails"][0]["url"].split("?")[0]

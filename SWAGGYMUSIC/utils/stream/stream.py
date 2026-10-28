@@ -2,7 +2,7 @@ import os
 from random import randint
 from typing import Union
 
-from pyrogram.types import InlineKeyboardMarkup
+from pyrogram.types import InlineKeyboardMarkup, LinkPreviewOptions
 
 import config
 from SWAGGYMUSIC import Carbon, YouTube, app
@@ -30,6 +30,10 @@ from SWAGGYMUSIC.utils.stream.queue import (
     put_queue_index,
 )
 from SWAGGYMUSIC.utils.errors import capture_internal_err
+
+# The Queue Panel's song title is a t.me link; without this Telegram adds a
+# link preview of it (the bot's profile card) to the message.
+NO_LINK_PREVIEW = LinkPreviewOptions(is_disabled=True)
 
 
 # =========================================================
@@ -670,6 +674,7 @@ async def stream(
                 reply_markup=InlineKeyboardMarkup(
                     button
                 ),
+                link_preview_options=NO_LINK_PREVIEW,
             )
 
             await link_queue_message(
@@ -827,6 +832,7 @@ async def stream(
                 reply_markup=InlineKeyboardMarkup(
                     button
                 ),
+                link_preview_options=NO_LINK_PREVIEW,
             )
 
             await link_queue_message(
@@ -967,6 +973,7 @@ async def stream(
                 reply_markup=InlineKeyboardMarkup(
                     button
                 ),
+                link_preview_options=NO_LINK_PREVIEW,
             )
 
             await link_queue_message(
@@ -1121,6 +1128,7 @@ async def stream(
                 reply_markup=InlineKeyboardMarkup(
                     button
                 ),
+                link_preview_options=NO_LINK_PREVIEW,
             )
 
             await link_queue_message(
@@ -1272,6 +1280,7 @@ async def stream(
                 reply_markup=InlineKeyboardMarkup(
                     button
                 ),
+                link_preview_options=NO_LINK_PREVIEW,
             )
 
             await link_queue_message(

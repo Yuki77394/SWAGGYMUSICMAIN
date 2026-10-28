@@ -1,5 +1,4 @@
 import asyncio
-import os
 
 from pyrogram import filters
 from pyrogram.errors import FloodWait
@@ -13,16 +12,23 @@ from SWAGGYMUSIC.utils.database import get_cmode, is_active_chat, is_music_playi
 from SWAGGYMUSIC.utils.decorators.language import language, languageCB
 from SWAGGYMUSIC.utils.inline import queue_back_markup, queue_markup
 from SWAGGYMUSIC.utils.stream.captions import queue_caption
+from SWAGGYMUSIC.utils.thumbnails import get_thumb
 from config import BANNED_USERS
 
 basic = {}
 
 
-def get_image(videoid):
-    if os.path.isfile(f"cache/{videoid}.png"):
-        return f"cache/{videoid}.png"
-    else:
-        return config.YOUTUBE_IMG_URL
+async def get_image(videoid, track):
+    # The song's own card, the same picture as its Play Panel (the old
+    # "cache/<id>.png" lookup never matched, so a fixed image was always shown).
+    image = await get_thumb(
+        videoid,
+        track.get("user_id"),
+        title=track.get("title"),
+        duration=track.get("dur"),
+        live=str(track.get("file") or "").startswith("live_"),
+    )
+    return image or config.YOUTUBE_IMG_URL
 
 
 def get_duration(playing):
@@ -67,9 +73,9 @@ async def get_queue(client, message: Message, _):
     typo = (got[0]["streamtype"]).title()
     DUR = get_duration(got)
     if "live_" in file:
-        IMAGE = get_image(videoid)
+        IMAGE = await get_image(videoid, got[0])
     elif "vid_" in file:
-        IMAGE = get_image(videoid)
+        IMAGE = await get_image(videoid, got[0])
     elif "index_" in file:
         IMAGE = config.STREAM_IMG_URL
     else:
@@ -82,7 +88,7 @@ async def get_queue(client, message: Message, _):
         elif videoid == "soundcloud":
             IMAGE = config.SOUNCLOUD_IMG_URL
         else:
-            IMAGE = get_image(videoid)
+            IMAGE = await get_image(videoid, got[0])
     cap = queue_caption(_, got, title, user)
     upl = (
         queue_markup(_, DUR, "c" if cplay else "g", videoid)
@@ -206,9 +212,9 @@ async def queue_back(client, CallbackQuery: CallbackQuery, _):
     typo = (got[0]["streamtype"]).title()
     DUR = get_duration(got)
     if "live_" in file:
-        IMAGE = get_image(videoid)
+        IMAGE = await get_image(videoid, got[0])
     elif "vid_" in file:
-        IMAGE = get_image(videoid)
+        IMAGE = await get_image(videoid, got[0])
     elif "index_" in file:
         IMAGE = config.STREAM_IMG_URL
     else:
@@ -221,7 +227,7 @@ async def queue_back(client, CallbackQuery: CallbackQuery, _):
         elif videoid == "soundcloud":
             IMAGE = config.SOUNCLOUD_IMG_URL
         else:
-            IMAGE = get_image(videoid)
+            IMAGE = await get_image(videoid, got[0])
     cap = queue_caption(_, got, title, user)
     upl = (
         queue_markup(_, DUR, cplay, videoid)

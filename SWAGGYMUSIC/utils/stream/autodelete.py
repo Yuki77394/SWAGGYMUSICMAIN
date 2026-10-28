@@ -1,3 +1,5 @@
+import asyncio
+
 from SWAGGYMUSIC.logging import LOGGER
 from SWAGGYMUSIC.misc import db
 from SWAGGYMUSIC.utils.database import get_autodelete
@@ -5,6 +7,9 @@ from SWAGGYMUSIC.utils.database import get_autodelete
 
 QUEUE_REF_KEYS = ("queue_chat_id", "queue_msg_id")
 PLAYER_REF_KEYS = ("player_chat_id", "player_msg_id", "mystic")
+
+# Queue Panel deletions in flight (kept referenced until they finish).
+_queue_panel_tasks: set = set()
 
 
 def _message_chat_id(message):
@@ -100,15 +105,49 @@ async def _delete_tracked_message(track: dict, keys: tuple[str, ...]) -> bool:
     return await _delete_by_ref(message, chat_id, message_id)
 
 
+async def link_queue_message(chat_id: int, track: dict | None, message) -> bool:
+    """
+    Record ``message`` as the Queue Panel of ``track`` (the song it announced).
+
+    The panel is deleted by ``delete_queue_message`` when that song starts.
+    If the song already started while its panel was being sent, the panel is
+    deleted now; if the song already left the queue, nothing is recorded.
+    """
+    queue = db.get(chat_id) or []
+    index = next((i for i, item in enumerate(queue) if item is track), None)
+    if index is None or not remember_queue_message(chat_id, message, index):
+        return False
+    if index == 0:
+        await delete_queue_message(chat_id, track)
+    return True
+
+
+async def _delete_queue_panel(chat_id: int, refs: dict) -> None:
+    if await _delete_tracked_message(refs, QUEUE_REF_KEYS):
+        LOGGER(__name__).info("Deleted Queue Panel of the started track | chat_id=%s", chat_id)
+
+
 async def delete_queue_message(chat_id: int, track: dict | None) -> bool:
+    """
+    Delete the Queue Panel recorded on ``track``; called when that queued
+    track starts playing, whatever the /autodelete setting.
+
+    The reference is detached before anything is awaited, so a panel is never
+    deleted twice, and the deletion runs in the background so it never delays
+    the stream.
+    """
     if not isinstance(track, dict):
         return False
-    if not await get_autodelete(_setting_chat_id(chat_id, track)):
+    refs = {key: track.pop(key, None) for key in QUEUE_REF_KEYS}
+    if not refs["queue_chat_id"] or not refs["queue_msg_id"]:
         return False
-    deleted = await _delete_tracked_message(track, QUEUE_REF_KEYS)
-    if deleted:
-        LOGGER(__name__).info("Auto-deleted queued-track notice | chat_id=%s", chat_id)
-    return deleted
+    try:
+        task = asyncio.get_running_loop().create_task(_delete_queue_panel(chat_id, refs))
+    except RuntimeError:
+        return False
+    _queue_panel_tasks.add(task)
+    task.add_done_callback(_queue_panel_tasks.discard)
+    return True
 
 
 async def delete_player_message(
@@ -137,5 +176,6 @@ async def delete_track_messages(chat_id: int, track: dict | None) -> None:
         return
     if not await get_autodelete(_setting_chat_id(chat_id, track)):
         return
+    # A Queue Panel is only deleted when its own track starts playing
+    # (delete_queue_message), never because the track left the queue.
     await _delete_tracked_message(track, PLAYER_REF_KEYS)
-    await _delete_tracked_message(track, QUEUE_REF_KEYS)

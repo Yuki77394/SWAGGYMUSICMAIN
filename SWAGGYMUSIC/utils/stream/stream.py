@@ -19,6 +19,11 @@ from SWAGGYMUSIC.utils.inline import (
     stream_markup,
 )
 from SWAGGYMUSIC.utils.pastebin import SWAGGYBIN
+from SWAGGYMUSIC.utils.stream.autodelete import link_queue_message
+from SWAGGYMUSIC.utils.stream.captions import (
+    play_caption,
+    queued_caption,
+)
 from SWAGGYMUSIC.utils.stream.cards import schedule_stream_card
 from SWAGGYMUSIC.utils.stream.queue import (
     put_queue,
@@ -442,17 +447,17 @@ async def stream(
                     original_chat_id=original_chat_id,
                     videoid=vidid,
                     user_id=user_id,
-                    caption=_[
-                        "stream_1"
-                    ].format(
+                    caption=play_caption(
+                        _,
                         (
                             f"https://t.me/"
                             f"{app.username}"
                             f"?start=info_{vidid}"
                         ),
-                        title[:23],
+                        title,
                         duration_min,
                         user_name,
+                        user_id,
                     ),
                     button=button,
                     markup="stream",
@@ -630,6 +635,8 @@ async def stream(
                 ),
             )
 
+            queued_track = db[chat_id][-1]
+
             position = (
                 len(
                     db.get(
@@ -645,19 +652,30 @@ async def stream(
                 chat_id,
             )
 
-            await app.send_message(
+            queue_panel = await app.send_message(
                 chat_id=original_chat_id,
-                text=_[
-                    "queue_4"
-                ].format(
+                text=queued_caption(
+                    _,
                     position,
-                    title[:27],
+                    (
+                        f"https://t.me/"
+                        f"{app.username}"
+                        f"?start=info_{vidid}"
+                    ),
+                    title,
                     duration_min,
                     user_name,
+                    user_id,
                 ),
                 reply_markup=InlineKeyboardMarkup(
                     button
                 ),
+            )
+
+            await link_queue_message(
+                chat_id,
+                queued_track,
+                queue_panel,
             )
 
         # -------------------------------------------------
@@ -723,17 +741,17 @@ async def stream(
                 original_chat_id=original_chat_id,
                 videoid=vidid,
                 user_id=user_id,
-                caption=_[
-                    "stream_1"
-                ].format(
+                caption=play_caption(
+                    _,
                     (
                         f"https://t.me/"
                         f"{app.username}"
                         f"?start=info_{vidid}"
                     ),
-                    title[:23],
+                    title,
                     duration_min,
                     user_name,
+                    user_id,
                 ),
                 button=button,
                 markup="stream",
@@ -778,6 +796,8 @@ async def stream(
                 "audio",
             )
 
+            queued_track = db[chat_id][-1]
+
             position = (
                 len(
                     db.get(
@@ -793,19 +813,26 @@ async def stream(
                 chat_id,
             )
 
-            await app.send_message(
+            queue_panel = await app.send_message(
                 chat_id=original_chat_id,
-                text=_[
-                    "queue_4"
-                ].format(
+                text=queued_caption(
+                    _,
                     position,
-                    title[:27],
+                    config.SUPPORT_CHAT,
+                    title,
                     duration_min,
                     user_name,
+                    user_id,
                 ),
                 reply_markup=InlineKeyboardMarkup(
                     button
                 ),
+            )
+
+            await link_queue_message(
+                chat_id,
+                queued_track,
+                queue_panel,
             )
 
         else:
@@ -841,13 +868,13 @@ async def stream(
             run = await app.send_photo(
                 original_chat_id,
                 photo=config.SOUNCLOUD_IMG_URL,
-                caption=_[
-                    "stream_1"
-                ].format(
+                caption=play_caption(
+                    _,
                     config.SUPPORT_CHAT,
-                    title[:23],
+                    title,
                     duration_min,
                     user_name,
+                    user_id,
                 ),
                 reply_markup=InlineKeyboardMarkup(
                     button
@@ -909,6 +936,8 @@ async def stream(
                 ),
             )
 
+            queued_track = db[chat_id][-1]
+
             position = (
                 len(
                     db.get(
@@ -924,19 +953,26 @@ async def stream(
                 chat_id,
             )
 
-            await app.send_message(
+            queue_panel = await app.send_message(
                 chat_id=original_chat_id,
-                text=_[
-                    "queue_4"
-                ].format(
+                text=queued_caption(
+                    _,
                     position,
-                    title[:27],
+                    link,
+                    title,
                     duration_min,
                     user_name,
+                    user_id,
                 ),
                 reply_markup=InlineKeyboardMarkup(
                     button
                 ),
+            )
+
+            await link_queue_message(
+                chat_id,
+                queued_track,
+                queue_panel,
             )
 
         else:
@@ -985,13 +1021,13 @@ async def stream(
                     if is_video
                     else config.TELEGRAM_AUDIO_URL
                 ),
-                caption=_[
-                    "stream_1"
-                ].format(
+                caption=play_caption(
+                    _,
                     link,
-                    title[:23],
+                    title,
                     duration_min,
                     user_name,
+                    user_id,
                 ),
                 reply_markup=InlineKeyboardMarkup(
                     button
@@ -1050,6 +1086,8 @@ async def stream(
                 ),
             )
 
+            queued_track = db[chat_id][-1]
+
             position = (
                 len(
                     db.get(
@@ -1065,19 +1103,30 @@ async def stream(
                 chat_id,
             )
 
-            await app.send_message(
+            queue_panel = await app.send_message(
                 chat_id=original_chat_id,
-                text=_[
-                    "queue_4"
-                ].format(
+                text=queued_caption(
+                    _,
                     position,
-                    title[:27],
+                    (
+                        f"https://t.me/"
+                        f"{app.username}"
+                        f"?start=info_{vidid}"
+                    ),
+                    title,
                     duration_min,
                     user_name,
+                    user_id,
                 ),
                 reply_markup=InlineKeyboardMarkup(
                     button
                 ),
+            )
+
+            await link_queue_message(
+                chat_id,
+                queued_track,
+                queue_panel,
             )
 
         else:
@@ -1146,17 +1195,17 @@ async def stream(
                 original_chat_id=original_chat_id,
                 videoid=vidid,
                 user_id=user_id,
-                caption=_[
-                    "stream_1"
-                ].format(
+                caption=play_caption(
+                    _,
                     (
                         f"https://t.me/"
                         f"{app.username}"
                         f"?start=info_{vidid}"
                     ),
-                    title[:23],
+                    title,
                     duration_min,
                     user_name,
+                    user_id,
                 ),
                 button=button,
                 markup="tg",
@@ -1193,6 +1242,8 @@ async def stream(
                 ),
             )
 
+            queued_track = db[chat_id][-1]
+
             position = (
                 len(
                     db.get(
@@ -1209,17 +1260,24 @@ async def stream(
             )
 
             await mystic.edit_text(
-                text=_[
-                    "queue_4"
-                ].format(
+                text=queued_caption(
+                    _,
                     position,
-                    title[:27],
+                    config.SUPPORT_CHAT,
+                    title,
                     duration_min,
                     user_name,
+                    user_id,
                 ),
                 reply_markup=InlineKeyboardMarkup(
                     button
                 ),
+            )
+
+            await link_queue_message(
+                chat_id,
+                queued_track,
+                mystic,
             )
 
         else:
@@ -1258,10 +1316,13 @@ async def stream(
             run = await app.send_photo(
                 original_chat_id,
                 photo=config.STREAM_IMG_URL,
-                caption=_[
-                    "stream_2"
-                ].format(
-                    user_name
+                caption=play_caption(
+                    _,
+                    config.SUPPORT_CHAT,
+                    title,
+                    duration_min,
+                    user_name,
+                    user_id,
                 ),
                 reply_markup=InlineKeyboardMarkup(
                     button

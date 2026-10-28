@@ -175,13 +175,14 @@ ping_2 : "{1}\n\n🏓 Ping : {0}ms..\n\n➻ Sistem Durumu :\n\n↬ Çalışma S�
 queue_1 : "» Kuyruk getiriliyor...\n\nLütfen bekleyin..."
 queue_2 : "» Kuyruk boş."
 queue_3 : "<u>» Kuyruğa alınan parçaların listesini görmek için buraya tıklayın :</u> <a href={0}>buraya</a>"
-queue_4 : "➲ <b>Kuyruğa #{0}. sıraya eklendi\n\n‣ Başlık :</b> {1}\n<b>‣ Süre :</b> {2} dakika\n<b>‣ İsteyen :</b> {3}"
+queue_4 : "<u><b><emoji id=\"5355051922862653659\">📢</emoji> Sɪʀᴀʏᴀ Eᴋʟᴇɴᴅɪ: {0}</b></u>\n\n<b><emoji id=\"5409119256107297715\">📢</emoji> Bᴀşʟɪᴋ:</b> <a href=\"{1}\">{2}</a>\n<b><emoji id=\"5408910404732595664\">📢</emoji> SÜʀᴇ:</b> {3} Dᴋ\n<b><emoji id=\"5409132617750555920\">📢</emoji> Çᴀʟᴀɴ:</b> {4}"
 queue_5 : "Kuyrukta yalnızca bir parça var.\n\nListeyi görmek için daha fazla parça ekleyin."
 queue_6 : "<b>🕚 Süre :</b> Bilinmeyen süreli yayın\n\nTüm kuyruk listesini görmek için aşağıdaki düğmeye tıklayın."
 queue_7 : "\nTüm kuyruk listesini görmek için aşağıdaki düğmeye tıklayın."
-queue_8 : "<b>{0} oynatıcı</b>\n\n🎄 <b>Yayınlanıyor :</b> {1}\n\n🔗 <b>Yayın türü :</b> {2}\n🥀 <b>İsteyen :</b> {3}\n{4}"
+queue_8 : "<u><b>Şᴜ Aɴᴅᴀ Çᴀʟɪʏᴏʀ:</b></u>\n\n<b>Bᴀşʟɪᴋ:</b> <a href={0}>{1}</a>\n<b>SÜʀᴇ:</b> {2}\n<b>İsᴛᴇʏᴇɴ:</b> {3}\n\n"
+queue_10 : "<b>{0}. Bᴀşʟɪᴋ:</b> {1}\n     - {2} Dᴋ\n\n"
 
-stream_1 : "➲ <b>Yayın Başlatıldı |</b>\n\n<b>‣ Başlık :</b> <a href={0}>{1}</a>\n<b>‣ Süre :</b> {2} dakika\n<b>‣ İsteyen :</b> {3}"
+stream_1 : "<u><b><emoji id=\"5355051922862653659\">📢</emoji> Yᴀʏɪɴ Bᴀşʟᴀᴛɪʟᴅɪ </b></u>\n\n<b><emoji id=\"5409119256107297715\">📢</emoji> Bᴀşʟɪᴋ:</b> <a href=\"{0}\">{1}</a>\n<b><emoji id=\"5408910404732595664\">📢</emoji> SÜʀᴇ:</b> {2} Dᴋ\n<b><emoji id=\"5409132617750555920\">📢</emoji> Çᴀʟᴀɴ:</b> {3}"
 stream_2 : "➲ <b>Yayın Başlatıldı |</b>\n\n<b>‣ Yayın türü :</b> canlı yayın [URL]\n<b>‣ İsteyen :</b> {0}"
 
 S_B_1 : "˹beni kaçır güzelim˼"

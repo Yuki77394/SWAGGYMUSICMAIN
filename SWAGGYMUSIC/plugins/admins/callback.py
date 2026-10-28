@@ -67,6 +67,7 @@ from SWAGGYMUSIC.utils.stream.autodelete import (
     remember_player_message,
 )
 
+from SWAGGYMUSIC.utils.stream.captions import play_caption
 from SWAGGYMUSIC.utils.stream.cards import (
     schedule_stream_card,
 )
@@ -1467,15 +1468,17 @@ async def handle_skip_replay(
             original_chat_id=callback.message.chat.id,
             videoid=videoid,
             user_id=requester_id,
-            caption=_["stream_1"].format(
+            caption=play_caption(
+                _,
                 (
                     f"https://t.me/"
                     f"{app.username}"
                     f"?start=info_{videoid}"
                 ),
-                title[:23],
+                title,
                 duration,
                 user,
+                requester_id,
             ),
             button=buttons,
             markup="tg",
@@ -1612,15 +1615,17 @@ async def handle_skip_replay(
             original_chat_id=callback.message.chat.id,
             videoid=videoid,
             user_id=requester_id,
-            caption=_["stream_1"].format(
+            caption=play_caption(
+                _,
                 (
                     f"https://t.me/"
                     f"{app.username}"
                     f"?start=info_{videoid}"
                 ),
-                title[:23],
+                title,
                 duration,
                 user,
+                requester_id,
             ),
             button=buttons,
             markup="stream",
@@ -1668,8 +1673,13 @@ async def handle_skip_replay(
 
         run = await callback.message.reply_photo(
             photo=STREAM_IMG_URL,
-            caption=_["stream_2"].format(
-                user
+            caption=play_caption(
+                _,
+                SUPPORT_CHAT,
+                title,
+                duration,
+                user,
+                requester_id,
             ),
             reply_markup=InlineKeyboardMarkup(
                 buttons
@@ -1753,11 +1763,13 @@ async def handle_skip_replay(
                     if str(streamtype) == "audio"
                     else TELEGRAM_VIDEO_URL
                 ),
-                caption=_["stream_1"].format(
+                caption=play_caption(
+                    _,
                     SUPPORT_CHAT,
-                    title[:23],
+                    title,
                     duration,
                     user,
+                    requester_id,
                 ),
                 reply_markup=InlineKeyboardMarkup(
                     buttons
@@ -1785,11 +1797,13 @@ async def handle_skip_replay(
                     if str(streamtype) == "audio"
                     else TELEGRAM_VIDEO_URL
                 ),
-                caption=_["stream_1"].format(
+                caption=play_caption(
+                    _,
                     SUPPORT_CHAT,
-                    title[:23],
+                    title,
                     duration,
                     user,
+                    requester_id,
                 ),
                 reply_markup=InlineKeyboardMarkup(
                     buttons
@@ -1816,15 +1830,17 @@ async def handle_skip_replay(
                 original_chat_id=callback.message.chat.id,
                 videoid=videoid,
                 user_id=requester_id,
-                caption=_["stream_1"].format(
+                caption=play_caption(
+                    _,
                     (
                         f"https://t.me/"
                         f"{app.username}"
                         f"?start=info_{videoid}"
                     ),
-                    title[:23],
+                    title,
                     duration,
                     user,
+                    requester_id,
                 ),
                 button=buttons,
                 markup="stream",

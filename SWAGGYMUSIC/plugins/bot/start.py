@@ -10,12 +10,12 @@ import aiohttp
 from pyrogram import filters
 from pyrogram.enums import ChatType
 from pyrogram.types import InlineKeyboardMarkup, Message
+from py_yt import VideosSearch
 
 import config
 from SWAGGYMUSIC import app
 from SWAGGYMUSIC.button_styles import primary_button, success_button
 from SWAGGYMUSIC.misc import _boot_
-from SWAGGYMUSIC.platforms.Youtube import _oembed_title, exact_video_result
 from SWAGGYMUSIC.plugins.sudo.sudoers import sudoers_list
 from SWAGGYMUSIC.utils import bot_sys_stats
 from SWAGGYMUSIC.utils.database import (
@@ -182,16 +182,9 @@ async def start_pm(client, message: Message, _):
                 vid_id = str(name).replace("info_", "", 1)
                 query = f"https://www.youtube.com/watch?v={vid_id}"
 
-                # Only YouTube's result for this very video may describe it;
-                # a search by its id can rank other videos first.
-                result = await exact_video_result(vid_id)
-                if not result:
-                    found_title = await _oembed_title(vid_id)
-                    result = {
-                        "title": found_title,
-                        "link": query,
-                        "thumbnails": [{"url": f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg"}],
-                    } if found_title else None
+                results = VideosSearch(query, limit=1)
+                data = await results.next()
+                result = (data.get("result") or [None])[0]
 
                 if not result:
                     return await m.edit_text("No results found.")

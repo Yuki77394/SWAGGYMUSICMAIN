@@ -47,7 +47,7 @@ from SWAGGYMUSIC.utils.stream.autoclear import auto_clean
 from SWAGGYMUSIC.utils.stream.autodelete import (
     delete_player_message,
     delete_queue_message,
-    remember_player_message,
+    keep_player_message,
 )
 from SWAGGYMUSIC.utils.stream.captions import play_caption
 from SWAGGYMUSIC.utils.stream.cards import schedule_stream_card
@@ -217,8 +217,12 @@ class Call:
         return _session_token(chat_id)
 
     @staticmethod
-    def _transition_is_stale(chat_id: int, session: int) -> bool:
-        if _session_token(chat_id) == session:
+    def _transition_is_stale(chat_id: int, session: int, track=None) -> bool:
+        """True when this transition must stop: the session ended, or (when
+        ``track`` is given) another transition, e.g. a second /skip, has
+        already replaced ``track`` at the head of the queue."""
+        queue = db.get(chat_id)
+        if _session_token(chat_id) == session and (track is None or (queue and queue[0] is track)):
             return False
         LOGGER(__name__).info("Dropping stale queue transition | chat=%s", chat_id)
         return True
@@ -931,7 +935,7 @@ class Call:
                     if await self._discard_unplayable_queue_head(client, chat_id, "live stream URL was unavailable", session):
                         return
                     continue
-                if self._transition_is_stale(chat_id, session):
+                if self._transition_is_stale(chat_id, session, current):
                     return
                 try:
                     await self._play_stream(client, chat_id, dynamic_media_stream(link, video=video))
@@ -939,7 +943,7 @@ class Call:
                     return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
                 button = stream_markup(_, chat_id)
-                schedule_stream_card(chat_id=chat_id, original_chat_id=original_chat_id, videoid=videoid, user_id=requester_id, caption=play_caption(_, f"https://t.me/{app.username}?start=info_{videoid}", title, current.get("dur"), user, requester_id), button=button, markup="tg")
+                schedule_stream_card(chat_id=chat_id, original_chat_id=original_chat_id, videoid=videoid, user_id=requester_id, caption=play_caption(_, f"https://t.me/{app.username}?start=info_{videoid}", title, current.get("dur"), user, requester_id), button=button, markup="tg", track=current)
                 return
             elif "vid_" in queued:
                 mystic = await app.send_message(original_chat_id, _["call_7"])
@@ -952,7 +956,7 @@ class Call:
                     if await self._discard_unplayable_queue_head(client, chat_id, "YouTube download returned no playable stream path", session):
                         return
                     continue
-                if self._transition_is_stale(chat_id, session):
+                if self._transition_is_stale(chat_id, session, current):
                     try:
                         await mystic.delete()
                     except Exception:
@@ -967,7 +971,7 @@ class Call:
                         if await self._discard_unplayable_queue_head(client, chat_id, "fallback YouTube download returned no playable stream path", session):
                             return
                         continue
-                    if self._transition_is_stale(chat_id, session):
+                    if self._transition_is_stale(chat_id, session, current):
                         try:
                             await mystic.delete()
                         except Exception:
@@ -986,14 +990,14 @@ class Call:
                 except Exception:
                     pass
                 schedule_youtube_precache_for_chat(chat_id)
-                schedule_stream_card(chat_id=chat_id, original_chat_id=original_chat_id, videoid=videoid, user_id=requester_id, caption=play_caption(_, f"https://t.me/{app.username}?start=info_{videoid}", title, current.get("dur"), user, requester_id), button=button, markup="stream")
+                schedule_stream_card(chat_id=chat_id, original_chat_id=original_chat_id, videoid=videoid, user_id=requester_id, caption=play_caption(_, f"https://t.me/{app.username}?start=info_{videoid}", title, current.get("dur"), user, requester_id), button=button, markup="stream", track=current)
                 return
             elif "index_" in queued:
                 if not videoid:
                     if await self._discard_unplayable_queue_head(client, chat_id, "index stream URL was missing", session):
                         return
                     continue
-                if self._transition_is_stale(chat_id, session):
+                if self._transition_is_stale(chat_id, session, current):
                     return
                 try:
                     await self._play_stream(client, chat_id, dynamic_media_stream(videoid, video=video))
@@ -1001,10 +1005,9 @@ class Call:
                     return await app.send_message(original_chat_id, text=_["call_6"])
                 self._schedule_playback_watchdog(client, chat_id)
                 button = stream_markup(_, chat_id)
-                run = await app.send_photo(chat_id=original_chat_id, photo=config.STREAM_IMG_URL, caption=play_caption(_, config.SUPPORT_CHAT, title, current.get("dur"), user, requester_id), reply_markup=InlineKeyboardMarkup(button))
-                current["mystic"] = run
-                remember_player_message(chat_id, run)
-                current["markup"] = "tg"
+                run = await app.send_photo(chat_id=original_chat_id, photo=config.STREAM_IMG_URL, caption=play_caption(_, config.SUPPORT_CHAT, title, current.get("dur"), user, requester_id), reply_markup=InlineKeyboardMarkup(button), has_spoiler=True)
+                if keep_player_message(chat_id, current, run):
+                    current["markup"] = "tg"
                 return
             else:
                 source = queued
@@ -1020,7 +1023,7 @@ class Call:
                         ) or queued
                     except Exception:
                         source = queued
-                if self._transition_is_stale(chat_id, session):
+                if self._transition_is_stale(chat_id, session, current):
                     return
                 try:
                     await self._play_stream(client, chat_id, dynamic_media_stream(source, video=video))
@@ -1029,19 +1032,17 @@ class Call:
                 self._schedule_playback_watchdog(client, chat_id)
                 if videoid == "telegram":
                     button = stream_markup(_, chat_id)
-                    run = await app.send_photo(chat_id=original_chat_id, photo=config.TELEGRAM_AUDIO_URL if str(streamtype) == "audio" else config.TELEGRAM_VIDEO_URL, caption=play_caption(_, config.SUPPORT_CHAT, title, current.get("dur"), user, requester_id), reply_markup=InlineKeyboardMarkup(button))
-                    current["mystic"] = run
-                    remember_player_message(chat_id, run)
-                    current["markup"] = "tg"
+                    run = await app.send_photo(chat_id=original_chat_id, photo=config.TELEGRAM_AUDIO_URL if str(streamtype) == "audio" else config.TELEGRAM_VIDEO_URL, caption=play_caption(_, config.SUPPORT_CHAT, title, current.get("dur"), user, requester_id), reply_markup=InlineKeyboardMarkup(button), has_spoiler=True)
+                    if keep_player_message(chat_id, current, run):
+                        current["markup"] = "tg"
                 elif videoid == "soundcloud":
                     button = stream_markup(_, chat_id)
-                    run = await app.send_photo(chat_id=original_chat_id, photo=config.SOUNCLOUD_IMG_URL, caption=play_caption(_, config.SUPPORT_CHAT, title, current.get("dur"), user, requester_id), reply_markup=InlineKeyboardMarkup(button))
-                    current["mystic"] = run
-                    remember_player_message(chat_id, run)
-                    current["markup"] = "tg"
+                    run = await app.send_photo(chat_id=original_chat_id, photo=config.SOUNCLOUD_IMG_URL, caption=play_caption(_, config.SUPPORT_CHAT, title, current.get("dur"), user, requester_id), reply_markup=InlineKeyboardMarkup(button), has_spoiler=True)
+                    if keep_player_message(chat_id, current, run):
+                        current["markup"] = "tg"
                 else:
                     button = stream_markup(_, chat_id)
-                    schedule_stream_card(chat_id=chat_id, original_chat_id=original_chat_id, videoid=videoid, user_id=requester_id, caption=play_caption(_, f"https://t.me/{app.username}?start=info_{videoid}", title, current.get("dur"), user, requester_id), button=button, markup="stream")
+                    schedule_stream_card(chat_id=chat_id, original_chat_id=original_chat_id, videoid=videoid, user_id=requester_id, caption=play_caption(_, f"https://t.me/{app.username}?start=info_{videoid}", title, current.get("dur"), user, requester_id), button=button, markup="stream", track=current)
                 return
 
     async def start(self) -> None:

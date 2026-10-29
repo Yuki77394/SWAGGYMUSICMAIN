@@ -64,7 +64,7 @@ from SWAGGYMUSIC.utils.stream.autoclear import auto_clean
 
 from SWAGGYMUSIC.utils.stream.autodelete import (
     delete_queue_message,
-    remember_player_message,
+    keep_player_message,
 )
 
 from SWAGGYMUSIC.utils.stream.captions import play_caption
@@ -207,6 +207,18 @@ def _player_message_id(track) -> int | None:
         return int(message_id) if message_id else None
     except (TypeError, ValueError):
         return None
+
+
+def _is_player_message(track, message) -> bool:
+    """True when ``message`` is ``track``'s Started Streaming message."""
+    mystic = track.get("mystic")
+    player_chat = track.get("player_chat_id") or getattr(
+        getattr(mystic, "chat", None), "id", None
+    )
+    return (
+        _player_message_id(track) == getattr(message, "id", None)
+        and player_chat == getattr(getattr(message, "chat", None), "id", None)
+    )
 
 
 def _player_markup(_, chat_id: int, more: bool) -> InlineKeyboardMarkup:
@@ -776,9 +788,25 @@ async def manage_callback(
 
         await callback.answer()
 
+        playing = _current_track(
+            chat_id
+        )
+
         await JARVIS.stop_stream(
             chat_id
         )
+
+        # As with /end: the stopped song's Started Streaming message
+        # goes too, whatever /autodelete says. When this button is on
+        # that very message, it is the one deleted just below.
+        if playing is not None and not _is_player_message(
+            playing,
+            callback.message,
+        ):
+            schedule_player_card_removal(
+                chat_id,
+                playing,
+            )
 
         await set_loop(
             chat_id,
@@ -1440,7 +1468,7 @@ async def handle_skip_replay(
 
             image = None
 
-        if JARVIS._transition_is_stale(chat_id, session):
+        if JARVIS._transition_is_stale(chat_id, session, current_track):
             return
 
         try:
@@ -1482,6 +1510,7 @@ async def handle_skip_replay(
             ),
             button=buttons,
             markup="tg",
+            track=current_track,
         )
 
         await _show_skip_notice(
@@ -1532,7 +1561,7 @@ async def handle_skip_replay(
 
             image = None
 
-        if JARVIS._transition_is_stale(chat_id, session):
+        if JARVIS._transition_is_stale(chat_id, session, current_track):
             try:
                 await mystic.delete()
             except Exception:
@@ -1583,7 +1612,7 @@ async def handle_skip_replay(
             file_path = fallback_path
             direct = fallback_direct
 
-            if JARVIS._transition_is_stale(chat_id, session):
+            if JARVIS._transition_is_stale(chat_id, session, current_track):
                 try:
                     await mystic.delete()
                 except Exception:
@@ -1629,6 +1658,7 @@ async def handle_skip_replay(
             ),
             button=buttons,
             markup="stream",
+            track=current_track,
         )
 
         await _show_skip_notice(
@@ -1649,7 +1679,7 @@ async def handle_skip_replay(
 
     elif "index_" in queued:
 
-        if JARVIS._transition_is_stale(chat_id, session):
+        if JARVIS._transition_is_stale(chat_id, session, current_track):
             return
 
         try:
@@ -1684,20 +1714,17 @@ async def handle_skip_replay(
             reply_markup=InlineKeyboardMarkup(
                 buttons
             ),
+            has_spoiler=True,
         )
 
-        db[chat_id][0][
-            "mystic"
-        ] = run
-
-        remember_player_message(
+        if keep_player_message(
             chat_id,
+            current_track,
             run,
-        )
-
-        db[chat_id][0][
-            "markup"
-        ] = "tg"
+        ):
+            current_track[
+                "markup"
+            ] = "tg"
 
         await _show_skip_notice(
             callback,
@@ -1732,7 +1759,7 @@ async def handle_skip_replay(
 
                 image = None
 
-        if JARVIS._transition_is_stale(chat_id, session):
+        if JARVIS._transition_is_stale(chat_id, session, current_track):
             return
 
         try:
@@ -1774,20 +1801,17 @@ async def handle_skip_replay(
                 reply_markup=InlineKeyboardMarkup(
                     buttons
                 ),
+                has_spoiler=True,
             )
 
-            db[chat_id][0][
-                "mystic"
-            ] = run
-
-            remember_player_message(
+            if keep_player_message(
                 chat_id,
+                current_track,
                 run,
-            )
-
-            db[chat_id][0][
-                "markup"
-            ] = "tg"
+            ):
+                current_track[
+                    "markup"
+                ] = "tg"
 
         elif videoid == "soundcloud":
 
@@ -1808,20 +1832,17 @@ async def handle_skip_replay(
                 reply_markup=InlineKeyboardMarkup(
                     buttons
                 ),
+                has_spoiler=True,
             )
 
-            db[chat_id][0][
-                "mystic"
-            ] = run
-
-            remember_player_message(
+            if keep_player_message(
                 chat_id,
+                current_track,
                 run,
-            )
-
-            db[chat_id][0][
-                "markup"
-            ] = "tg"
+            ):
+                current_track[
+                    "markup"
+                ] = "tg"
 
         else:
 
@@ -1844,6 +1865,7 @@ async def handle_skip_replay(
                 ),
                 button=buttons,
                 markup="stream",
+                track=current_track,
             )
 
         await _show_skip_notice(

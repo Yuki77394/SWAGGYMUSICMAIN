@@ -1,14 +1,25 @@
+import logging
 import os
 import re
-import aiofiles
+import uuid
+from io import BytesIO
+
 import aiohttp
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 from py_yt import VideosSearch
 from config import YOUTUBE_IMG_URL
 
+LOGGER = logging.getLogger(__name__)
+
 # Constants
 CACHE_DIR = "cache"
 os.makedirs(CACHE_DIR, exist_ok=True)
+
+# A card is cached as "<video id>_v6.png", and only when it was drawn from that
+# video's own search result and its own picture. Older "<video id>_v4.png" files
+# may hold another video's card or the generic YOUTUBE_IMG_URL picture, so they
+# are never read (they are left in place; /restart clears the cache folder).
+CACHE_VERSION = "v6"
 
 PANEL_W, PANEL_H = 763, 545
 PANEL_X = (1280 - PANEL_W) // 2
@@ -44,11 +55,66 @@ def trim_to_width(text: str, font: ImageFont.FreeTypeFont, max_w: int) -> str:
             return text[:i] + ellipsis
     return ellipsis
 
-async def get_thumb(videoid, user_id=None):
-    cache_path = os.path.join(CACHE_DIR, f"{videoid}_v4.png")
+
+def _same_video_picture(videoid) -> str:
+    # YouTube's standard picture file of exactly this video (not a search).
+    return f"https://i.ytimg.com/vi/{videoid}/hqdefault.jpg"
+
+
+async def _download_picture(session, videoid, url):
+    """The picture at ``url`` sized for the card, or None (the reason is logged)."""
+    try:
+        async with session.get(url) as resp:
+            if resp.status != 200:
+                LOGGER.warning(
+                    "Thumbnail picture unavailable | video_id=%s | url=%s | HTTP %s",
+                    videoid, str(url).split("?")[0], resp.status,
+                )
+                return None
+            data = await resp.read()
+        return Image.open(BytesIO(data)).resize((1280, 720)).convert("RGBA")
+    except Exception as err:
+        LOGGER.warning(
+            "Thumbnail picture failed | video_id=%s | url=%s | %s: %s",
+            videoid, str(url).split("?")[0], type(err).__name__, err,
+        )
+        return None
+
+
+def _save(image, path: str) -> str:
+    # Written under a unique name first, so a card that is being uploaded is
+    # never read half-written while another play of the same video saves it.
+    tmp = f"{path}.{uuid.uuid4().hex}.tmp"
+    try:
+        image.save(tmp, format="PNG")
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return path
+
+
+async def get_thumb(videoid, user_id=None, title=None, duration=None):
+    """
+    Play Panel card of ``videoid``: the path of a PNG card, or YOUTUBE_IMG_URL
+    when no picture of this video can be downloaded (that generic image is
+    only shown, never cached as the video's card).
+
+    ``title`` and ``duration`` are the playing track's own values. They are
+    drawn only when YouTube's search does not return this video.
+    """
+    cache_path = os.path.join(CACHE_DIR, f"{videoid}_{CACHE_VERSION}.png")
     if os.path.exists(cache_path):
         return cache_path
+    try:
+        return await _make_card(videoid, cache_path, title, duration)
+    except Exception as err:
+        # A card problem must never stop the Play Panel or the playback.
+        LOGGER.warning("Thumbnail card failed | video_id=%s | %s: %s", videoid, type(err).__name__, err)
+        return YOUTUBE_IMG_URL
 
+
+async def _make_card(videoid, cache_path, track_title, track_duration):
     # YouTube video data fetch. Still one search request; YouTube can rank
     # other videos first for it, so only this video's own result is used.
     results = VideosSearch(f"https://www.youtube.com/watch?v={videoid}", limit=10)
@@ -56,31 +122,44 @@ async def get_thumb(videoid, user_id=None):
         results_data = await results.next()
         result_items = [item for item in results_data.get("result", []) if item.get("id") == videoid]
         if not result_items:
-            raise ValueError("No results found.")
+            raise ValueError("this video is not among its search results")
         data = result_items[0]
         title = re.sub(r"\W+", " ", data.get("title", "Unsupported Title")).title()
-        thumbnail = data.get("thumbnails", [{}])[0].get("url", YOUTUBE_IMG_URL)
+        thumbnail = (data.get("thumbnails") or [{}])[0].get("url")
         duration = data.get("duration")
         views = data.get("viewCount", {}).get("short", "Unknown Views")
-    except Exception:
-        title, thumbnail, duration, views = "Unsupported Title", YOUTUBE_IMG_URL, None, "Unknown Views"
+        from_search = True
+    except Exception as err:
+        LOGGER.warning("Thumbnail metadata unavailable | video_id=%s | %s: %s", videoid, type(err).__name__, err)
+        # The playing track's own title and length; the picture is still this
+        # video's own (below), never another video's or a generic one.
+        title = re.sub(r"\W+", " ", str(track_title or "")).strip().title() or "Unsupported Title"
+        thumbnail = None
+        duration = None if str(track_duration or "").strip().lower() == "live track" else track_duration
+        views = "Unknown Views"
+        from_search = False
 
     is_live = not duration or str(duration).strip().lower() in {"", "live", "live now"}
     duration_text = "Live" if is_live else duration or "Unknown Mins"
 
-    # Download thumbnail
-    thumb_path = os.path.join(CACHE_DIR, f"thumb{videoid}.png")
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(thumbnail) as resp:
-                if resp.status == 200:
-                    async with aiofiles.open(thumb_path, "wb") as f:
-                        await f.write(await resp.read())
-    except Exception:
+    # Download thumbnail: the result's own picture, else this same video's
+    # standard picture file.
+    base = None
+    used = None
+    async with aiohttp.ClientSession() as session:
+        for url in dict.fromkeys(u for u in (thumbnail, _same_video_picture(videoid)) if u):
+            base = await _download_picture(session, videoid, url)
+            if base is not None:
+                used = url
+                break
+    if base is None:
+        LOGGER.warning(
+            "Thumbnail: no picture of this video could be downloaded; showing YOUTUBE_IMG_URL (not cached) | video_id=%s",
+            videoid,
+        )
         return YOUTUBE_IMG_URL
 
     # Create base image
-    base = Image.open(thumb_path).resize((1280, 720)).convert("RGBA")
     bg = ImageEnhance.Brightness(base.filter(ImageFilter.BoxBlur(10))).enhance(0.6)
 
     # Frosted glass panel
@@ -124,11 +203,10 @@ async def get_thumb(videoid, user_id=None):
         black_ic = Image.merge("RGBA", (r.point(lambda *_: 0), g.point(lambda *_: 0), b.point(lambda *_: 0), a))
         bg.paste(black_ic, (ICONS_X, ICONS_Y), black_ic)
 
-    # Cleanup and save
-    try:
-        os.remove(thumb_path)
-    except OSError:
-        pass
-
-    bg.save(cache_path)
-    return cache_path
+    if from_search and used == thumbnail:
+        # This video's own search result and own picture: cached.
+        return _save(bg, cache_path)
+    # Drawn with fallback data: shown for this play only and not stored under
+    # the video's cache name, so the next play tries again.
+    LOGGER.info("Thumbnail fallback card (not cached) | video_id=%s | picture=%s", videoid, str(used).split("?")[0])
+    return _save(bg, os.path.join(CACHE_DIR, f"{videoid}_{CACHE_VERSION}_fallback.png"))

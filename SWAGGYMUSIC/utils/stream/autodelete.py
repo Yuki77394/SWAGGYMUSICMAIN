@@ -10,6 +10,8 @@ PLAYER_REF_KEYS = ("player_chat_id", "player_msg_id", "mystic")
 
 # Queue Panel deletions in flight (kept referenced until they finish).
 _queue_panel_tasks: set = set()
+# Deletions of player messages whose song changed while they were being sent.
+_stale_player_tasks: set = set()
 
 
 def _message_chat_id(message):
@@ -56,6 +58,29 @@ def remember_player_message(chat_id: int, message) -> bool:
         return True
     except Exception:
         return False
+
+
+def keep_player_message(chat_id: int, track: dict | None, message) -> bool:
+    """
+    Record ``message`` as the Started Streaming message of ``track`` while that
+    track is still the one playing. If the song changed while the message was
+    being sent (skipped or stopped), the message is deleted in the background
+    instead, so it never stays behind and never becomes the next song's.
+    """
+    queue = db.get(chat_id)
+    if isinstance(track, dict) and queue and queue[0] is track:
+        track["mystic"] = message
+        remember_player_message(chat_id, message)
+        return True
+    try:
+        task = asyncio.get_running_loop().create_task(
+            _delete_by_ref(message, _message_chat_id(message), _message_id(message))
+        )
+    except RuntimeError:
+        return False
+    _stale_player_tasks.add(task)
+    task.add_done_callback(_stale_player_tasks.discard)
+    return False
 
 
 def _setting_chat_id(chat_id: int, track: dict | None) -> int:

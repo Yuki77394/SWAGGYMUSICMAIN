@@ -19,7 +19,10 @@ from SWAGGYMUSIC.utils.inline import (
     stream_markup,
 )
 from SWAGGYMUSIC.utils.pastebin import SWAGGYBIN
-from SWAGGYMUSIC.utils.stream.autodelete import link_queue_message
+from SWAGGYMUSIC.utils.stream.autodelete import (
+    keep_player_message,
+    link_queue_message,
+)
 from SWAGGYMUSIC.utils.stream.captions import (
     play_caption,
     queued_caption,
@@ -866,6 +869,8 @@ async def stream(
                 forceplay=forceplay,
             )
 
+            playing_track = db[chat_id][0]
+
             button = stream_markup(
                 _,
                 chat_id,
@@ -885,15 +890,17 @@ async def stream(
                 reply_markup=InlineKeyboardMarkup(
                     button
                 ),
+                has_spoiler=True,
             )
 
-            db[chat_id][0][
-                "mystic"
-            ] = run
-
-            db[chat_id][0][
-                "markup"
-            ] = "tg"
+            if keep_player_message(
+                chat_id,
+                playing_track,
+                run,
+            ):
+                playing_track[
+                    "markup"
+                ] = "tg"
 
     # =====================================================
     # TELEGRAM
@@ -1011,6 +1018,8 @@ async def stream(
                 forceplay=forceplay,
             )
 
+            playing_track = db[chat_id][0]
+
             if is_video:
                 await add_active_video_chat(
                     chat_id
@@ -1039,15 +1048,17 @@ async def stream(
                 reply_markup=InlineKeyboardMarkup(
                     button
                 ),
+                has_spoiler=True,
             )
 
-            db[chat_id][0][
-                "mystic"
-            ] = run
-
-            db[chat_id][0][
-                "markup"
-            ] = "tg"
+            if keep_player_message(
+                chat_id,
+                playing_track,
+                run,
+            ):
+                playing_track[
+                    "markup"
+                ] = "tg"
 
     # =====================================================
     # LIVE
@@ -1317,6 +1328,8 @@ async def stream(
                 forceplay=forceplay,
             )
 
+            playing_track = db[chat_id][0]
+
             button = stream_markup(
                 _,
                 chat_id,
@@ -1336,15 +1349,17 @@ async def stream(
                 reply_markup=InlineKeyboardMarkup(
                     button
                 ),
+                has_spoiler=True,
             )
 
-            db[chat_id][0][
-                "mystic"
-            ] = run
-
-            db[chat_id][0][
-                "markup"
-            ] = "tg"
+            if keep_player_message(
+                chat_id,
+                playing_track,
+                run,
+            ):
+                playing_track[
+                    "markup"
+                ] = "tg"
 
             try:
                 await mystic.delete()

@@ -11,7 +11,7 @@ import yt_dlp
 import requests
 from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
-from py_yt import Playlist
+from py_yt import VideosSearch
 
 
 # Single API downloader. Configure these in Heroku Config Vars if the provider

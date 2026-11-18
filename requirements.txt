@@ -39,7 +39,7 @@ python-whois
 # Keep py-yt-search for non-playback integrations (autoplay, lyrics,
 # thumbnails and other platform lookups). YouTube playback itself uses the
 # same async search implementation as Queen for matching search/startup flow.
-py-yt-search==0.8.0
+py-yt-search==0.8.2
 # Queen's playback search implementation (async VideosSearch.future API).
 git+https://github.com/SkyBotsDeveloper/youtube-search-python.git
 yt-dlp

@@ -36,10 +36,12 @@ pyshorteners
 python-dotenv
 python-whois
 
-# py-yt-search provides the async VideosSearch API (await .next());
-# replaces youtube-search-python whose .future submodule was removed in 1.6.x
-# and whose sync API is incompatible with httpx==0.28.1 (proxies kwarg removed).
+# Keep py-yt-search for non-playback integrations (autoplay, lyrics,
+# thumbnails and other platform lookups). YouTube playback itself uses the
+# same async search implementation as Queen for matching search/startup flow.
 py-yt-search==0.8.0
+# Queen's playback search implementation (async VideosSearch.future API).
+git+https://github.com/SkyBotsDeveloper/youtube-search-python.git
 yt-dlp
 
 PyYAML
